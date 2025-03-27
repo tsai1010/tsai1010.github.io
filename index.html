@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Midi Synthesizer Test</title>
+    <link rel="stylesheet" href="styles/style.css" />
+  </head>
+  <body>
+    <h1>
+      <strong><em>Midi Synthesizer</em></strong>
+    </h1>
+    <img src="images/image1.png" width="3%" height="5%" id="img" onmousedown="menuShow();"/>
+    <div class="menu" id="menu">
+      Menu
+      <hr style="margin: 0; border-color: #820041;"/>
+      <div class="menuBar" id="m1" onmouseover="menuBarOver(this);" onmouseout="menuBarOut(this);">
+        <span style="position: absolute; left: 10%; width: 10%; color: black;">MIDI&nbsp;port:</span>
+        <select id="midiInputPort" onchange="midiPortSet(this);">
+          <option value="all">All&nbsp;inputs</option>
+        </select>
+      </div>
+      <div class="menuBar" id="m1" onmouseover="menuBarOver(this);" onmouseout="menuBarOut(this);">
+        <span style="position: absolute; left: 10%; width: 10%; color: black;">Audio:</span>
+        <input class="menuSet" id="audioValue" type="range" min="0" max="1" step="0.01" value="0.15"/>
+        <img src="images/AudioOff.png" width="7%" height="100%" id="AudioImg" onmousedown="AudioBtn();"/>
+      </div>
+      <div class="menuBar" id="m1" onmouseover="menuBarOver(this);" onmouseout="menuBarOut(this);">
+        <span style="position: absolute; left: 10%; width: 10%; color: black;">Tune:</span>
+        <input class="menuSet" id="tuneValue" type="range" min="420" max="460" step="1" value="440"/>
+        <span style="position: absolute; right: 17.5%; width: 7%; height: 100%; color: black;" id="tuneFreq">440Hz</span>
+      </div>
+      
+
+    </div>
+    <div id="piano">
+      <div id="KeyboardB"></div>
+      <div id="KeyboardW"></div>
+    </div>
+    <div id="floor"></div>
+    <script src="scripts/data.js"></script>
+    <script src="scripts/main.js"></script>
+    <script src="scripts/midi.js"></script>
+  </body>
+</html>
