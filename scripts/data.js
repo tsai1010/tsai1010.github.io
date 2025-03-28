@@ -92,11 +92,11 @@ midiToId = {
 
 let channelFilter = [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1];
 
-let Cfclk = [false, false, false, false];
-let Cfclk1 = false;
-let Cfclk2 = false;
-let Cfclk3 = false;
-let Cfclk4 = false;
+// let Cfclk = [false, false, false, false];
+// let Cfclk1 = false;
+// let Cfclk2 = false;
+// let Cfclk3 = false;
+// let Cfclk4 = false;
 
 
 

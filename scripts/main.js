@@ -103,63 +103,6 @@ function keyOff(key, note){
     else if(key.id=="blackKey") key.style.background="black";
     
     if(playInput) noteOff(note);
-    //console.log(note, 0);
-    //console.log("Off");
-}
-
-function cfClick1(cf, num){
-    if (Cfclk1==false){
-        cf.style.background=WkeyColor[num];
-        channelFilter[num] = 1;
-        Cfclk1 = true;
-    }
-    else if (Cfclk1==true){
-        cf.style.background = "linear-gradient(120deg, #B15BFF, #AE00AE, #820041)";
-        channelFilter[num] = 0;
-        Cfclk1 = false;
-    }
-    
-}
-
-function cfClick2(cf, num){
-    if (Cfclk2==false){
-        cf.style.background=WkeyColor[num];
-        channelFilter[num] = 1;
-        Cfclk2 = true;
-    }
-    else if (Cfclk2==true){
-        cf.style.background = "linear-gradient(120deg, #B15BFF, #AE00AE, #820041)";
-        channelFilter[num] = 0;
-        Cfclk2 = false;
-    }
-    
-}
-
-function cfClick3(cf, num){
-    if (Cfclk3==false){
-        cf.style.background=WkeyColor[num];
-        channelFilter[num] = 1;
-        Cfclk3 = true;
-    }
-    else if (Cfclk3==true){
-        cf.style.background = "linear-gradient(120deg, #B15BFF, #AE00AE, #820041)";
-        channelFilter[num] = 0;
-        Cfclk3 = false;
-    }
-    
-}
-
-function cfClick4(cf, num){
-    if (Cfclk4==false){
-        cf.style.background=WkeyColor[num];
-        channelFilter[num] = 1;
-        Cfclk4 = true;
-    }
-    else if (Cfclk4==true){
-        cf.style.background = "linear-gradient(120deg, #B15BFF, #AE00AE, #820041)";
-        channelFilter[num] = 0;
-        Cfclk4 = false;
-    }
     
 }
 

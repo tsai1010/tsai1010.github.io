@@ -105,7 +105,7 @@ function noteOn(note, velocity){
 
         bandPassFilter.type = "highpass";
         bandPassFilter.frequency = 300;
-        bandPassFilter.Q = 1/2**(1/2);
+        bandPassFilter.Q = 1/2;
 
         filter.connect(bandPassFilter);
         bandPassFilter.connect(ctx.destination);
@@ -120,7 +120,7 @@ function noteOn(note, velocity){
 function noteOff(note){
     if(oscSet[note.toString()]){
 
-        for(let h = 0; h < harmonic; h++) {
+        for(let h = 0; h < harmonic*3; h++) {
             const osc = oscSet[note.toString()][h];
 
             const oscGain = osc.gain;
@@ -147,23 +147,24 @@ function failure(){
 function harmonicCreate(note, freq, velValue, type, inHarmonic, filter){
     const harmonicSet = [];
     let ratioIndex = type*8;
+    let osc_freq;
     for(let h = 1; h < harmonic + 1; h++) {
-        const osc = ctx.createOscillator();
-        const oscGain = ctx.createGain();
-        const velocityGain = ctx.createGain();
-        const bandPassFilter = ctx.createBiquadFilter();
+        // const osc = ctx.createOscillator();
+        // const oscGain = ctx.createGain();
+        // const velocityGain = ctx.createGain();
+        // const bandPassFilter = ctx.createBiquadFilter();
 
-        let {currentTime} = ctx;
+        // let {currentTime} = ctx;
 
-        oscGain.gain.value = totalAudioValue;
+        // oscGain.gain.value = totalAudioValue;
 
-        bandPassFilter.type = "bandpass";
-        bandPassFilter.frequency = freq*h*2.5;
-        bandPassFilter.Q = 1/2**(1/2);
+        // bandPassFilter.type = "bandpass";
+        // bandPassFilter.frequency = freq*h*2.5;
+        // bandPassFilter.Q = 1/2**(1/2);
 
-        osc.type = "sine";
-        osc.frequency.value = freq*h;
-        velocityGain.gain.value = 0;
+        // osc.type = "sine";
+        osc_freq = freq*h;
+        // velocityGain.gain.value = 0;
 
         if(h==1) {
             velocityAmount = velValue;
@@ -172,30 +173,70 @@ function harmonicCreate(note, freq, velValue, type, inHarmonic, filter){
         }
         else {
             velocityAmount = velValue*harmonicRatio[ratioIndex+h-1];
-            osc.frequency.value += osc.frequency.value*inHarmonic;
+            osc_freq += osc_freq*inHarmonic;
             decay_time = osc_decay - (note-14+(h-1)*6)/12.0;
             vel_adj = 1+((58-note-(h-1)*6)*-0.75/64);
         }
 
         velocityAmount *= vel_adj;
 
-        osc.connect(oscGain);
-        oscGain.connect(velocityGain);
-        velocityGain.connect(bandPassFilter);
-        bandPassFilter.connect(filter);
+        // osc.connect(oscGain);
+        // oscGain.connect(velocityGain);
+        // velocityGain.connect(bandPassFilter);
+        // bandPassFilter.connect(filter);
 
-        osc.gain = oscGain;
-        osc.vel = velocityGain;
+        // osc.gain = oscGain;
+        // osc.vel = velocityGain;
 
-        harmonicSet.push(osc);
+        harmonicSet.push(oscCreate(osc_freq, velocityAmount, decay_time, filter));
+        harmonicSet.push(oscCreate(osc_freq*(1 + inHarmonic/8), velocityAmount, decay_time, filter));
+        harmonicSet.push(oscCreate(osc_freq*(1 - inHarmonic/8), velocityAmount, decay_time, filter));
 
-        osc.start();
+        // inHarmonic = Math.random()/200;
+        // harmonicSet.push(oscCreate(osc_freq*(1 + inHarmonic/5), velocityAmount*0.8, decay_time*0.8, filter));
+        // harmonicSet.push(oscCreate(osc_freq*(1 - inHarmonic/5), velocityAmount*0.8, decay_time*0.8, filter));
 
-        velocityGain.gain.exponentialRampToValueAtTime(velocityAmount, currentTime + osc_attack + osc_easing);
-        velocityGain.gain.exponentialRampToValueAtTime(0.000001, currentTime + osc_attack + decay_time + osc_easing);
+        // osc.start();
+
+        // velocityGain.gain.exponentialRampToValueAtTime(velocityAmount, currentTime + osc_attack + osc_easing);
+        // velocityGain.gain.exponentialRampToValueAtTime(0.000001, currentTime + osc_attack + decay_time + osc_easing);
 
 
     }
 
     return harmonicSet;
+}
+
+function oscCreate(freq, velocityAmount, decay_time, filter){
+    const osc = ctx.createOscillator();
+    const oscGain = ctx.createGain();
+    const velocityGain = ctx.createGain();
+    const bandPassFilter = ctx.createBiquadFilter();
+
+    let {currentTime} = ctx;
+
+    oscGain.gain.value = totalAudioValue;
+
+    bandPassFilter.type = "bandpass";
+    bandPassFilter.frequency = freq*2.5;
+    bandPassFilter.Q = 1/2**(1/2);
+
+    osc.type = "sine";
+    osc.frequency.value = freq;
+    velocityGain.gain.value = 0;
+
+    osc.connect(oscGain);
+    oscGain.connect(velocityGain);
+    velocityGain.connect(bandPassFilter);
+    bandPassFilter.connect(filter);
+
+    osc.gain = oscGain;
+    osc.vel = velocityGain;
+
+    osc.start();
+
+    velocityGain.gain.exponentialRampToValueAtTime(velocityAmount, currentTime + osc_attack + osc_easing);
+    velocityGain.gain.exponentialRampToValueAtTime(0.000001, currentTime + osc_attack + decay_time + osc_easing);
+
+    return osc;
 }
