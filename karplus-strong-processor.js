@@ -16,6 +16,7 @@ class KarplusStrongProcessor extends AudioWorkletProcessor {
         });
         this.pointer = 0;
         this.lowpassEnabled = lowpass ?? false;
+        this.c = Math.exp(-2*Math.PI*6000/sampleRate);
       };
     }
   
@@ -24,6 +25,7 @@ class KarplusStrongProcessor extends AudioWorkletProcessor {
     }
   
     process(inputs, outputs, parameters) {
+      const input = inputs[0][0];
       const output = outputs[0][0];
       for (let i = 0; i < output.length; i++) {
         const current = this.buffer[this.pointer];
@@ -31,7 +33,7 @@ class KarplusStrongProcessor extends AudioWorkletProcessor {
         let avg = 0.5 * (current + next) * this.decay;
   
         if (this.lowpassEnabled) {
-          avg = this.lowpassFilter(avg, this.lastSample, 0.5); // alpha 可微調
+          avg = this.lowpassFilter(avg, this.lastSample, this.c); // alpha 可微調
           this.lastSample = avg;
         }
   
