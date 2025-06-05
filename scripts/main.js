@@ -5,11 +5,13 @@ function drawPiano(){
     const audioV = document.querySelector("#audioValue");
     audioV.addEventListener("input", (event) => {
       totalAudioValue = event.target.value;
+      setMasterV(totalAudioValue);
     })
 
     const tuneV = document.querySelector("#tuneValue");
     tuneV.addEventListener("input", (event) => {
         A4_freq = event.target.value;
+        setA4(A4_freq);
         document.getElementById("tuneFreq").innerText = A4_freq + "Hz";
     })
     
@@ -95,19 +97,19 @@ function keyOn(key, note, velocity, color){
     if(key.id=="whiteKey") key.style.background=WkeyColor[color];
     else if(key.id=="blackKey") key.style.background=BkeyColor[color];
     
-    if(playInput) noteOn(note, velocity);
+    // if(playInput&&color>13) synthOn(note, velocity);
     //console.info(key);
 }
 function keyOff(key, note){
     if(key.id=="whiteKey") key.style.background="white";
     else if(key.id=="blackKey") key.style.background="black";
     
-    if(playInput) noteOff(note);
+    if(playInput) synthOff(note);
     
 }
 
 document.addEventListener("keydown", (e) => {
-if((e.keyCode>=48&&e.keyCode<=90)||e.keyCode==188) keyOn(document.getElementsByClassName(keyToId[e.keyCode])[0], parseInt(keyToMidi[e.keyCode]), 70, 0);
+if((e.keyCode>=48&&e.keyCode<=90)||e.keyCode==188) keyOn(document.getElementsByClassName(keyToId[e.keyCode])[0], parseInt(keyToMidi[e.keyCode]), 70, 14);
 });
 document.addEventListener("keyup", (e) => {
 if((e.keyCode>=48&&e.keyCode<=90)||e.keyCode==188) keyOff(document.getElementsByClassName(keyToId[e.keyCode])[0], parseInt(keyToMidi[e.keyCode]));
