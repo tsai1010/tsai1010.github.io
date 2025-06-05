@@ -29,6 +29,20 @@ function MidiSynthCore(target){
             }
             return noiseArray;
         },
+        createReverb: async () => {
+            this.convolver = this.actx.createConvolver();
+
+            try {
+                const response = await fetch("data:audio/wav;base64," + piezo);
+                const arraybuffer = await response.arrayBuffer();
+                const audioBuffer = await this.actx.decodeAudioData(arraybuffer);
+                this.convolver.buffer = audioBuffer;
+            }catch (error) {
+                console.error("Error loading reverb impulse:", error);
+            }
+
+            // return convolver;
+        },
         init:()=>{
             this.pg=[]; this.vol=[]; this.ex=[]; this.bend=[]; this.rpnidx=[]; this.brange=[];
             this.sustain=[]; this.notetab=[]; this.rhythm=[];
@@ -49,7 +63,7 @@ function MidiSynthCore(target){
 
             this.asmWrapper = new AsmFunctionsWrapper();
             this.options = {
-                stringTension: 0.0,
+                stringTension: 0.2,
                 characterVariation: 0.5,
                 stringDamping: 0.5,
                 stringDampingVariation: 0.25,
@@ -57,7 +71,7 @@ function MidiSynthCore(target){
                 pluckDamping: 0.5,
                 pluckDampingVariation: 0.25,
                 body: "simple",
-                stereoSpread: 0.5
+                stereoSpread: 0.2
             }
 
             setInterval(
@@ -488,7 +502,21 @@ function MidiSynthCore(target){
             this.out=this.actx.createGain();
             this.comp=this.actx.createDynamicsCompressor();
             this.setMasterVol();
-            this.out.connect(this.comp);
+
+            (async () => {
+                await this.createReverb(); // ✅ 確保等到 ConvolverNode 回來
+                if (!this.convolver) {
+                    console.error("Reverb node is null");
+                    return;
+                }
+
+                
+                this.out.connect(this.convolver);
+                this.convolver.connect(this.comp);
+            })();
+
+            // this.out.connect(this.revb);
+            // this.revb.connect(this.comp);
             this.comp.connect(this.dest);
             this.chvol=[]; this.chmod=[]; this.chpan=[];
             this.lfo=this.actx.createOscillator();
