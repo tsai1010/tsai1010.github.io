@@ -97,7 +97,7 @@ function keyOn(key, note, velocity, color){
     if(key.id=="whiteKey") key.style.background=WkeyColor[color];
     else if(key.id=="blackKey") key.style.background=BkeyColor[color];
     
-    // if(playInput&&color>13) synthOn(note, velocity);
+    if(playInput&&color>13) synthOn(note, velocity);
     //console.info(key);
 }
 function keyOff(key, note){

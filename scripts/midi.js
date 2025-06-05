@@ -205,11 +205,19 @@ function handleInput(input){
 }
 
 function synthOn(n, v){
-    midi_synth.send([0x91, n, v]);
+    if(!oscSet[n.toString()]){
+        oscSet[n.toString()] = 1;
+        midi_synth.send([0x91, n, v]);
+    }
+    
 }
 
 function synthOff(n){
-    midi_synth.send([0x81, n]);
+    if(oscSet[n.toString()]){
+        midi_synth.send([0x81, n]);
+        delete oscSet[n.toString()];
+    }
+    
 }
 
 
