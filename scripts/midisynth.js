@@ -2,7 +2,7 @@ function MidiSynthCore(target){
     Object.assign(target,{
         properties:{
             debug:      {type:Number, value:0},
-            masterVol:  {type:Number, value:0.15, observer:"setMasterVol"},
+            masterVol:  {type:Number, value:0.3, observer:"setMasterVol"},
             voices:     {type:Number, value:64},
             internalcontext: {type:Number, value:1},
             a4_freq: {type:Number, value:440.0, observer:"setA4freq"},
@@ -426,13 +426,17 @@ function MidiSynthCore(target){
                 f = f.toFixed(2);
                 sampleRate = this.actx.sampleRate;
                 let bf = this.actx.createBuffer(2, this.actx.sampleRate, this.actx.sampleRate);
+                let smoothingFactor = this.options.stringDamping +
+                                        Math.pow((note-31)/44, 0.5) * (1 - this.options.stringDamping) * 0.5 +
+                                        (1 - this.options.stringDamping) *
+                                        Math.random() * this.options.stringDampingVariation;
                 this.seedNoise = this.generateSeedNoise(65535, Math.round(sampleRate/f));
                 this.asmWrapper.pluck(
                     bf,
                     this.seedNoise,
                     sampleRate,
                     f,
-                    0.5,
+                    smoothingFactor,
                     vel/4,
                     this.options,
                     0
@@ -500,9 +504,13 @@ function MidiSynthCore(target){
             if(!dest)
                 this.dest=actx.destination;
             this.out=this.actx.createGain();
+            this.revg=this.actx.createGain();
+            this.outg=this.actx.createGain();
             this.comp=this.actx.createDynamicsCompressor();
             this.setMasterVol();
 
+            this.revg.gain.setValueAtTime(0.09, this.actx.currentTime);
+            this.outg.gain.setValueAtTime(0.01, this.actx.currentTime);
             (async () => {
                 await this.createReverb(); // ✅ 確保等到 ConvolverNode 回來
                 if (!this.convolver) {
@@ -512,11 +520,14 @@ function MidiSynthCore(target){
 
                 
                 this.out.connect(this.convolver);
-                this.convolver.connect(this.comp);
+                this.convolver.connect(this.revg);
             })();
 
             // this.out.connect(this.revb);
             // this.revb.connect(this.comp);
+            this.out.connect(this.outg);
+            this.outg.connect(this.comp);
+            this.revg.connect(this.comp);
             this.comp.connect(this.dest);
             this.chvol=[]; this.chmod=[]; this.chpan=[];
             this.lfo=this.actx.createOscillator();
