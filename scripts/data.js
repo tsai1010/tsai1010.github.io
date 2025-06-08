@@ -2,7 +2,7 @@ let inputPort = 'loopMIDI Port'
 let outputPort = 'test'
 
 let allPort = true;
-let totalAudioValue = 0.15;
+let totalAudioValue = 0.3;
 let harmonic = 9;
 
 let osc_easing = 0.0001;

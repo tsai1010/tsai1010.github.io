@@ -30,13 +30,13 @@ function MidiSynthCore(target){
             return noiseArray;
         },
         createReverb: async () => {
-            this.convolver = this.actx.createConvolver();
+            // this.convolver = this.actx.createConvolver();
 
             try {
                 const response = await fetch("data:audio/wav;base64," + piezo);
                 const arraybuffer = await response.arrayBuffer();
-                const audioBuffer = await this.actx.decodeAudioData(arraybuffer);
-                this.convolver.buffer = audioBuffer;
+                this.audioBuffer = await this.actx.decodeAudioData(arraybuffer);
+                // this.convolver.buffer = audioBuffer;
             }catch (error) {
                 console.error("Error loading reverb impulse:", error);
             }
@@ -428,7 +428,7 @@ function MidiSynthCore(target){
             else {
                 // this.actx.resume();
                 let f=this.a4_freq * (2 ** ((note - 69) / 12.0));
-                f = f.toFixed(2);
+                f = f.toFixed(5);
                 sampleRate = this.actx.sampleRate;
                 let bf = this.actx.createBuffer(2, this.actx.sampleRate, this.actx.sampleRate);
                 let nn = Math.pow(note/64, 0.5);
@@ -520,36 +520,40 @@ function MidiSynthCore(target){
             this.outg.gain.setValueAtTime(0.01, this.actx.currentTime);
             (async () => {
                 await this.createReverb(); // ✅ 確保等到 ConvolverNode 回來
-                if (!this.convolver) {
+                if (!this.audioBuffer) {
                     console.error("Reverb node is null");
                     return;
                 }
 
                 
-                this.out.connect(this.convolver);
-                this.convolver.connect(this.revg);
+                // this.out.connect(this.convolver);
+                // this.convolver.connect(this.revg);
             })();
 
             // this.out.connect(this.revb);
             // this.revb.connect(this.comp);
-            this.out.connect(this.outg);
-            this.outg.connect(this.comp);
-            this.revg.connect(this.comp);
+            this.out.connect(this.comp);
+            this.outg.connect(this.out);
+            this.revg.connect(this.out);
             this.comp.connect(this.dest);
-            this.chvol=[]; this.chmod=[]; this.chpan=[];
+            this.chvol=[]; this.chmod=[]; this.chpan=[]; this.conv=[];
             this.lfo=this.actx.createOscillator();
             this.lfo.frequency.value=5;
             this.lfo.start(0);
             for(let i=0;i<16;++i){
                 this.chvol[i]=this.actx.createGain();
+                this.conv[i]=this.actx.createConvolver();
+                this.conv[i].buffer=this.audioBuffer;
                 if(this.actx.createStereoPanner){
                     this.chpan[i]=this.actx.createStereoPanner();
                     this.chvol[i].connect(this.chpan[i]);
-                    this.chpan[i].connect(this.out);
+                    this.chpan[i].connect(this.outg);
+                    this.chpan[i].connect(this.conv[i]).connect(this.revg);
                 }
                 else{
                     this.chpan[i]=null;
-                    this.chvol[i].connect(this.out);
+                    this.chvol[i].connect(this.outg);
+                    this.chvol[i].connect(this.conv[i]).connect(this.revg);
                 }
                 this.chmod[i]=this.actx.createGain();
                 this.lfo.connect(this.chmod[i]);
