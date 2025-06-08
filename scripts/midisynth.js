@@ -428,7 +428,7 @@ function MidiSynthCore(target){
             else {
                 // this.actx.resume();
                 let f=this.a4_freq * (2 ** ((note - 69) / 12.0));
-                f = f.toFixed(5);
+                // f = f.toFixed(5);
                 sampleRate = this.actx.sampleRate;
                 let bf = this.actx.createBuffer(2, this.actx.sampleRate, this.actx.sampleRate);
                 let nn = Math.pow(note/64, 0.5);
