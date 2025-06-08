@@ -384,6 +384,11 @@ function MidiSynthCore(target){
             //             this._releaseNote(nt,t);
             //     }
             // }
+            
+            // const bfs = this.bfSet[ch][n];
+            // if (bfs instanceof AudioBufferSourceNode) {
+            //         bfs.stop(t);
+            //     }
 
             if(this.oscSet[ch][n]){
 
@@ -418,16 +423,18 @@ function MidiSynthCore(target){
             t=this._tsConv(t);
             if(this.debug)
                 console.log("noteOn:", channel, note, vel, t);
-            if(this.pg[channel]==1)
+            if(this.pg[channel]==-1)
                 this._note(t,channel,note,vel);
-            else if(this.pg[channel]==0){
+            else {
                 // this.actx.resume();
                 let f=this.a4_freq * (2 ** ((note - 69) / 12.0));
                 f = f.toFixed(2);
                 sampleRate = this.actx.sampleRate;
                 let bf = this.actx.createBuffer(2, this.actx.sampleRate, this.actx.sampleRate);
+                let nn = Math.pow(note/64, 0.5);
+                if(!nn) nn = 0;
                 let smoothingFactor = this.options.stringDamping +
-                                        Math.pow((note-31)/44, 0.5) * (1 - this.options.stringDamping) * 0.5 +
+                                        nn * (1 - this.options.stringDamping) * 0.5 +
                                         (1 - this.options.stringDamping) *
                                         Math.random() * this.options.stringDampingVariation;
                 this.seedNoise = this.generateSeedNoise(65535, Math.round(sampleRate/f));
