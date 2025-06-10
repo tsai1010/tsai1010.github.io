@@ -450,7 +450,7 @@ function MidiSynthCore(target){
                 let bf = this.actx.createBuffer(2, this.actx.sampleRate, this.actx.sampleRate);
                 let nn = Math.pow(note/64, 0.5);
                 if(!nn) nn = 0;
-                this.options[ch].stringDamping = (note * this.inv127)*0.75 + 0.25;
+                this.options[ch].stringDamping = (note * this.inv127)*0.85 + 0.15;
 
                 let smoothingFactor = this.options[ch].stringDamping +
                                         nn * (1 - this.options[ch].stringDamping) * 0.5 +
