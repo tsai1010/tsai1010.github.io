@@ -33,7 +33,7 @@ function MidiSynthCore(target){
             // this.convolver = this.actx.createConvolver();
 
             try {
-                const response = await fetch("data:audio/wav;base64," + piezo);
+                const response = await fetch("data:audio/wav;base64," + IR_Gibson);
                 const arraybuffer = await response.arrayBuffer();
                 this.audioBuffer = await this.actx.decodeAudioData(arraybuffer);
                 // this.convolver.buffer = audioBuffer;
@@ -47,7 +47,11 @@ function MidiSynthCore(target){
             this.pg=[]; this.vol=[]; this.ex=[]; this.bend=[]; this.rpnidx=[]; this.brange=[];
             this.sustain=[]; this.notetab=[]; this.rhythm=[];
             this.masterTuningC=0; this.masterTuningF=0; this.tuningC=[]; this.tuningF=[]; this.scaleTuning=[];
-            this.maxTick=0, this.playTick=0, this.playing=0; this.releaseRatio=3.5; this.oscSet=[]; this.bfSet=[];
+            this.maxTick=0, this.playTick=0, this.playing=0; this.releaseRatio=3.5; 
+            this.oscSet=[]; this.bfSet=[]; this.asmWrapper=[]; this.options=[]; this.seedNoise=[];
+
+            this.inv127 = 1 / 127;
+
             for(let i=0;i<16;++i){
                 let k=[];j=[];
                 this.vol[i]=3*100*100/(127*127);
@@ -56,23 +60,36 @@ function MidiSynthCore(target){
                 this.rhythm[i]=0;
                 this.oscSet[i]=k;
                 this.bfSet[i]=j;
+
+                this.asmWrapper[i] = new AsmFunctionsWrapper();
+                this.options[i] = {
+                    stringTension: 0.0,
+                    characterVariation: 0.5,
+                    stringDamping: 0.5,
+                    stringDampingVariation: 0.25,
+                    stringDampingCalculation: "direct",
+                    pluckDamping: 0.5,
+                    pluckDampingVariation: 0.25,
+                    body: "simple",
+                    stereoSpread: 0.2
+                }
             }
             this.rhythm[9]=1;
             this.preroll=0.2;
             this.relcnt=0;
 
-            this.asmWrapper = new AsmFunctionsWrapper();
-            this.options = {
-                stringTension: 0.2,
-                characterVariation: 0.5,
-                stringDamping: 0.5,
-                stringDampingVariation: 0.25,
-                stringDampingCalculation: "direct",
-                pluckDamping: 0.5,
-                pluckDampingVariation: 0.25,
-                body: "simple",
-                stereoSpread: 0.2
-            }
+            // this.asmWrapper = new AsmFunctionsWrapper();
+            // this.options = {
+            //     stringTension: 0.0,
+            //     characterVariation: 0.5,
+            //     stringDamping: 0.5,
+            //     stringDampingVariation: 0.25,
+            //     stringDampingCalculation: "direct",
+            //     pluckDamping: 0.5,
+            //     pluckDampingVariation: 0.25,
+            //     body: "simple",
+            //     stereoSpread: 0.2
+            // }
 
             setInterval(
                 function(){
@@ -414,17 +431,17 @@ function MidiSynthCore(target){
                 delete this.oscSet[ch][n];
             }
         },
-        noteOn:(channel, note, vel, t)=>{
+        noteOn:(ch, note, vel, t)=>{
             if(vel==0){
-                this.noteOff(channel,note,t);
+                this.noteOff(ch,note,t);
                 return;
             }
 
             t=this._tsConv(t);
             if(this.debug)
-                console.log("noteOn:", channel, note, vel, t);
-            if(this.pg[channel]==-1)
-                this._note(t,channel,note,vel);
+                console.log("noteOn:", ch, note, vel, t);
+            if(this.pg[ch]==-1)
+                this._note(t,ch,note,vel);
             else {
                 // this.actx.resume();
                 let f=this.a4_freq * (2 ** ((note - 69) / 12.0));
@@ -433,32 +450,35 @@ function MidiSynthCore(target){
                 let bf = this.actx.createBuffer(2, this.actx.sampleRate, this.actx.sampleRate);
                 let nn = Math.pow(note/64, 0.5);
                 if(!nn) nn = 0;
-                let smoothingFactor = this.options.stringDamping +
-                                        nn * (1 - this.options.stringDamping) * 0.5 +
-                                        (1 - this.options.stringDamping) *
-                                        Math.random() * this.options.stringDampingVariation;
-                this.seedNoise = this.generateSeedNoise(65535, Math.round(sampleRate/f));
-                this.asmWrapper.pluck(
+                let smoothingFactor = this.options[ch].stringDamping +
+                                        nn * (1 - this.options[ch].stringDamping) * 0.5 +
+                                        (1 - this.options[ch].stringDamping) *
+                                        Math.random() * this.options[ch].stringDampingVariation;
+                this.seedNoise[ch] = this.generateSeedNoise(65535, Math.round(sampleRate/f));
+                this.options[ch].stringDamping = note * this.inv127; // 0.5 + (note / 127 - 0.5) * 0.9
+                // this.options[ch].stringTension = 1 + ((note * this.inv127) * -0.9);
+                // this.options.stringTension = 0.9 * (1 - Math.pow((note * this.inv127), 1.5));
+                this.asmWrapper[ch].pluck(
                     bf,
-                    this.seedNoise,
+                    this.seedNoise[ch],
                     sampleRate,
                     f,
                     smoothingFactor,
                     vel/4,
-                    this.options,
-                    0
+                    this.options[ch],
+                    0.2
                 );
                 const bfs = this.actx.createBufferSource();
                 bfs.buffer = bf;
-                bfs.connect(this.chvol[channel]);
+                bfs.connect(this.chvol[ch]);
                 
-                this.chmod[channel].connect(bfs.detune);
-                bfs.detune.value = this.bend[channel];
-                this.bfSet[channel][note]=bfs;
+                this.chmod[ch].connect(bfs.detune);
+                bfs.detune.value = this.bend[ch];
+                this.bfSet[ch][note]=bfs;
                 bfs.addEventListener('ended', () => {
-                    if (this.bfSet[channel][note] === bfs) {
-                        this.bfSet[channel][note] = null;
-                        if (this.debug) console.log(`bfs[channel:${channel}][note:${note}] cleared`);
+                    if (this.bfSet[ch][note] === bfs) {
+                        this.bfSet[ch][note] = null;
+                        if (this.debug) console.log(`bfs[channel:${ch}][note:${note}] cleared`);
                     }
                 });
 
