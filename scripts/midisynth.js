@@ -450,12 +450,14 @@ function MidiSynthCore(target){
                 let bf = this.actx.createBuffer(2, this.actx.sampleRate, this.actx.sampleRate);
                 let nn = Math.pow(note/64, 0.5);
                 if(!nn) nn = 0;
+                this.options[ch].stringDamping = (note * this.inv127)*0.75 + 0.25;
+
                 let smoothingFactor = this.options[ch].stringDamping +
                                         nn * (1 - this.options[ch].stringDamping) * 0.5 +
                                         (1 - this.options[ch].stringDamping) *
                                         Math.random() * this.options[ch].stringDampingVariation;
                 this.seedNoise[ch] = this.generateSeedNoise(65535, Math.round(sampleRate/f));
-                this.options[ch].stringDamping = note * this.inv127; // 0.5 + (note / 127 - 0.5) * 0.9
+                 // 0.5 + (note / 127 - 0.5) * 0.9
                 // this.options[ch].stringTension = 1 + ((note * this.inv127) * -0.9);
                 // this.options.stringTension = 0.9 * (1 - Math.pow((note * this.inv127), 1.5));
                 this.asmWrapper[ch].pluck(
