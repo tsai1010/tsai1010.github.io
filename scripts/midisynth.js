@@ -43,6 +43,41 @@ function MidiSynthCore(target){
 
             // return convolver;
         },
+        makeLimiterCurve:() => {
+            const samples = 44100;
+            const curve = new Float32Array(samples);
+            for (let i = 0; i < samples; ++i) {
+                const x = (i * 2) / samples - 1;
+                curve[i] = Math.tanh(x * 1.2); // soft limit at roughly ±0.8
+            }
+            return curve;
+        },
+        makeAcousticGuitarShaper: (gain = 1.5) => {
+            const samples = 44100;
+            const curve = new Float32Array(samples);
+            for (let i = 0; i < samples; ++i) {
+                const x = (i * 2) / samples - 1;
+                // 柔和非線性曲線，保留低幅細節
+                const y = Math.sign(x) * Math.pow(Math.abs(x), 0.6); // soft non-linearity
+                curve[i] = y * 0.55 + x * 0.45; // 60% 非線性 + 40% 原始信號
+            }
+            return curve;
+        },
+        // makeAcousticGuitarShaper: (mode = 1) => {
+        //     const samples = 44100;
+        //     let curve = new Float32Array(samples);
+        //     for (let i = 0; i < samples; ++i) {
+        //         const x = (i * 2) / samples - 1;
+        //         if (mode === 1) {
+        //             curve[i] = x * 0.9 + 0.1 * Math.tanh(x * 1.2);
+        //         } else if (mode === 2) {
+        //             curve[i] = x / (1 + 3 * Math.abs(x));
+        //         } else {
+        //             curve[i] = x < 0 ? Math.sin(x * 1.5) : Math.tanh(x * 2.2);
+        //         }
+        //     }
+        //     return curve;
+        // },
         init:()=>{
             this.pg=[]; this.vol=[]; this.ex=[]; this.bend=[]; this.rpnidx=[]; this.brange=[];
             this.sustain=[]; this.notetab=[]; this.rhythm=[];
@@ -64,12 +99,12 @@ function MidiSynthCore(target){
                 this.asmWrapper[i] = new AsmFunctionsWrapper();
                 this.options[i] = {
                     stringTension: 0.0,
-                    characterVariation: 0.5,
+                    characterVariation: 0.2,
                     stringDamping: 0.5,
-                    stringDampingVariation: 0.25,
+                    stringDampingVariation: 0.1,
                     stringDampingCalculation: "direct",
                     pluckDamping: 0.5,
-                    pluckDampingVariation: 0.25,
+                    pluckDampingVariation: 0.1,
                     body: "simple",
                     stereoSpread: 0.2
                 }
@@ -77,19 +112,6 @@ function MidiSynthCore(target){
             this.rhythm[9]=1;
             this.preroll=0.2;
             this.relcnt=0;
-
-            // this.asmWrapper = new AsmFunctionsWrapper();
-            // this.options = {
-            //     stringTension: 0.0,
-            //     characterVariation: 0.5,
-            //     stringDamping: 0.5,
-            //     stringDampingVariation: 0.25,
-            //     stringDampingCalculation: "direct",
-            //     pluckDamping: 0.5,
-            //     pluckDampingVariation: 0.25,
-            //     body: "simple",
-            //     stereoSpread: 0.2
-            // }
 
             setInterval(
                 function(){
@@ -113,6 +135,8 @@ function MidiSynthCore(target){
                 this.setAudioContext(new AudioContext());
             }
             this.isReady=1;
+
+            console.log("Midi_Synth v0.1.2 Ready");
         },
         setMasterVol:(v)=>{
             if(v!=undefined)
@@ -536,10 +560,19 @@ function MidiSynthCore(target){
             this.revg=this.actx.createGain();
             this.outg=this.actx.createGain();
             this.comp=this.actx.createDynamicsCompressor();
+            
+
+            this.comp.threshold.setValueAtTime(-18, this.actx.currentTime);
+            this.comp.knee.setValueAtTime(10, this.actx.currentTime);
+            this.comp.ratio.setValueAtTime(3, this.actx.currentTime);
+            this.comp.attack.setValueAtTime(0.003, this.actx.currentTime);
+            this.comp.release.setValueAtTime(0.2, this.actx.currentTime);
+            
+
             this.setMasterVol();
 
             this.revg.gain.setValueAtTime(0.09, this.actx.currentTime);
-            this.outg.gain.setValueAtTime(0.01, this.actx.currentTime);
+            this.outg.gain.setValueAtTime(0.15, this.actx.currentTime);
             (async () => {
                 await this.createReverb(); // ✅ 確保等到 ConvolverNode 回來
                 if (!this.audioBuffer) {
@@ -558,7 +591,9 @@ function MidiSynthCore(target){
             this.outg.connect(this.out);
             this.revg.connect(this.out);
             this.comp.connect(this.dest);
-            this.chvol=[]; this.chmod=[]; this.chpan=[]; this.conv=[];
+            this.chvol=[]; this.chmod=[]; this.chpan=[]; this.conv=[]; this.shap=[]; this.revDelay=[];
+            this.oldGain=[]; this.preGain=[]; this.postShaperGain=[]; this.dryLowGain=[]; this.shapGain=[];
+            this.postFilter=[]; this.warmthBoost=[]; this.lpf=[]; this.hpf=[]; this.shapLpf=[]; this.highBoost=[]; this.softLimiter=[];
             this.lfo=this.actx.createOscillator();
             this.lfo.frequency.value=5;
             this.lfo.start(0);
@@ -566,17 +601,88 @@ function MidiSynthCore(target){
                 this.chvol[i]=this.actx.createGain();
                 this.conv[i]=this.actx.createConvolver();
                 this.conv[i].buffer=this.audioBuffer;
+
+                this.revDelay[i]=this.actx.createDelay();
+                this.revDelay[i].delayTime.setValueAtTime(0.01, this.actx.currentTime);
+
+                this.shap[i]=this.actx.createWaveShaper();
+                this.shap[i].curve = this.makeAcousticGuitarShaper();
+                this.shap[i].oversample = '4x';
+                this.preGain[i] = this.actx.createGain();
+                this.preGain[i].gain.setValueAtTime(0.1, this.actx.currentTime);
+
+                this.postShaperGain[i] = this.actx.createGain();
+                this.postShaperGain[i].gain.setValueAtTime(0.6, this.actx.currentTime);
+
+
+                this.postFilter[i] = this.actx.createBiquadFilter();
+                this.postFilter[i].type = 'lowpass';
+                this.postFilter[i].frequency.value = 6000;
+                this.postFilter[i].Q.value = 0.5;
+
+
+                this.warmthBoost[i] = this.actx.createBiquadFilter();
+                this.warmthBoost[i].type = "peaking";
+                this.warmthBoost[i].frequency.value = 250; // 低中頻
+                this.warmthBoost[i].Q.value = 1.0;
+                this.warmthBoost[i].gain.value = 2.5; // 提升 4 dB 左右
+
+                this.hpf[i] = this.actx.createBiquadFilter();
+                this.hpf[i].type = 'highpass';
+                this.hpf[i].frequency.value = 120;
+                this.hpf[i].Q.value = 0.707;
+
+                this.lpf[i] = this.actx.createBiquadFilter();
+                this.lpf[i].type = 'lowpass';
+                this.lpf[i].frequency.value = 100;
+                this.lpf[i].Q.value = 0.707;
+
+                this.shapLpf[i] = this.actx.createBiquadFilter();
+                this.shapLpf[i].type = 'lowpass';
+                this.shapLpf[i].frequency.value = 6000;
+                this.shapLpf[i].Q.value = 0.6;
+
+                this.highBoost[i] = this.actx.createBiquadFilter();
+                this.highBoost[i].type = 'highshelf';
+                this.highBoost[i].frequency.value = 3000;
+                this.highBoost[i].gain.value = 1.5; // 提升 3dB
+
+                this.dryLowGain[i] = this.actx.createGain();
+                this.dryLowGain[i].gain.setValueAtTime(0.3, this.actx.currentTime);
+
+                this.shapGain[i] = this.actx.createGain();
+                this.shapGain[i].gain.setValueAtTime(0.2, this.actx.currentTime);
+
+                this.oldGain[i] = this.actx.createGain();
+                this.oldGain[i].gain.setValueAtTime(0.15, this.actx.currentTime);
+
+                this.softLimiter[i] = this.actx.createWaveShaper();
+                this.softLimiter[i].curve = this.makeLimiterCurve();
+                this.softLimiter[i].oversample = '4x';
+
                 if(this.actx.createStereoPanner){
                     this.chpan[i]=this.actx.createStereoPanner();
                     this.chvol[i].connect(this.chpan[i]);
-                    this.chpan[i].connect(this.outg);
-                    this.chpan[i].connect(this.conv[i]).connect(this.revg);
+                    this.chpan[i].connect(this.preGain[i]);
+
+                    this.chpan[i].connect(this.oldGain[i]).connect(this.postShaperGain[i]);
+                    
+                    // this.chpan[i].connect(this.shap[i]).connect(this.conv[i]).connect(this.revg);
                 }
                 else{
                     this.chpan[i]=null;
-                    this.chvol[i].connect(this.outg);
-                    this.chvol[i].connect(this.conv[i]).connect(this.revg);
+                    this.chvol[i].connect(this.preGain[i]);
+
+                    this.chvol[i].connect(this.oldGain[i]).connect(this.postShaperGain[i]);
+                    // this.chvol[i].connect(this.shap[i]).connect(this.conv[i]).connect(this.revg);
                 }
+
+                this.preGain[i].connect(this.hpf[i]).connect(this.shap[i]).connect(this.postFilter[i]).connect(this.warmthBoost[i]).connect(this.highBoost[i]).connect(this.shapGain[i]).connect(this.softLimiter[i]).connect(this.shapLpf[i]).connect(this.postShaperGain[i]);
+                this.preGain[i].connect(this.lpf[i]).connect(this.dryLowGain[i]).connect(this.postShaperGain[i]);
+
+                this.postShaperGain[i].connect(this.outg);
+                this.postShaperGain[i].connect(this.revDelay[i]).connect(this.conv[i]).connect(this.revg);
+
                 this.chmod[i]=this.actx.createGain();
                 this.lfo.connect(this.chmod[i]);
                 // this.pg[i]=0;
