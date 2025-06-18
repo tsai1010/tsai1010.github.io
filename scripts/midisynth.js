@@ -461,6 +461,10 @@ function MidiSynthCore(target){
                 return;
             }
 
+            if(ch==9){
+                return;
+            }
+
             t=this._tsConv(t);
             if(this.debug)
                 console.log("noteOn:", ch, note, vel, t);
