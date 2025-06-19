@@ -655,7 +655,7 @@ function MidiSynthCore(target){
                 this.dryLowGain[i].gain.setValueAtTime(0.3, this.actx.currentTime);
 
                 this.shapGain[i] = this.actx.createGain();
-                this.shapGain[i].gain.setValueAtTime(0.2, this.actx.currentTime);
+                this.shapGain[i].gain.setValueAtTime(0.15, this.actx.currentTime);
 
                 this.oldGain[i] = this.actx.createGain();
                 this.oldGain[i].gain.setValueAtTime(0.15, this.actx.currentTime);
