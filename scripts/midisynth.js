@@ -29,6 +29,86 @@ function MidiSynthCore(target){
             }
             return noiseArray;
         },
+        generateSeedPinkNoise: (seed, samples) => {
+            let noiseArray = new Float32Array(samples);
+
+            // 初始化濾波器參數
+            let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+
+            for (let i = 0; i < samples; i++) {
+                const white = -1 + 2 * Math.random(); // 白噪音 [-1, 1]
+                b0 = 0.99886 * b0 + white * 0.0555179;
+                b1 = 0.99332 * b1 + white * 0.0750759;
+                b2 = 0.96900 * b2 + white * 0.1538520;
+                b3 = 0.86650 * b3 + white * 0.3104856;
+                b4 = 0.55000 * b4 + white * 0.5329522;
+                b5 = -0.7616 * b5 - white * 0.0168980;
+                const pink = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
+                b6 = white * 0.115926;
+                noiseArray[i] = pink * 0.11; // 總合縮放避免破音
+            }
+
+            return noiseArray;
+        },
+        generateSeedGrayNoise: (seed, samples, sampleRate = 44100) => {
+            const noiseArray = new Float32Array(samples);
+            const outputArray = new Float32Array(samples);
+
+            // 白噪音輸入（與原來一樣）
+            for (let i = 0; i < samples; i++) {
+                noiseArray[i] = -1 + 2 * Math.random();
+            }
+
+            // A-weighting 濾波器參數（IIR）
+            // 根據 IEC 61672 標準簡化版，以下為雙二階濾波器
+            let y1 = 0, y2 = 0, y3 = 0;
+            let x1 = 0, x2 = 0;
+
+            const f1 = 20.598997;
+            const f2 = 107.65265;
+            const f3 = 737.86223;
+            const f4 = 12194.217;
+
+            const pi = Math.PI;
+            const A1000 = 1.9997; // normalize at 1 kHz
+
+            // 預先計算係數（設計 IIR 濾波器的話可以更精準）
+            const k = 2 * pi / sampleRate;
+            const a = f4 ** 2 * (noiseArray[0] + 2 * x1 + x2) - (f1 + f2 + f3) * y1 - f1 * f2 * f3 * y2;
+
+            // 簡化：用一個 FIR 類似的平衡濾波，模擬高通+低通效果
+            for (let i = 0; i < samples; i++) {
+                const x0 = noiseArray[i];
+
+                // A-weighted 模擬（這裡用的是簡化版本，實際用數位濾波器會更準）
+                const y = 0.169 * x0 - 0.5 * x1 + 0.33 * x2;
+
+                outputArray[i] = y * A1000;
+
+                // 位移歷史值
+                x2 = x1;
+                x1 = x0;
+            }
+
+            return outputArray;
+        },
+        generateSeedBrownNoise: (seed, samples) => {
+            const noiseArray = new Float32Array(samples);
+
+            let lastOut = 0.0;
+
+            for (let i = 0; i < samples; i++) {
+                const white = Math.random() * 2 - 1;
+                // 一階積分濾波器，抑制高頻、保留低頻
+                noiseArray[i] = (lastOut + (0.02 * white)) / 1.02;
+                lastOut = noiseArray[i];
+
+                // 避免累積偏移，稍微 scale
+                noiseArray[i] *= 3.5;
+            }
+
+            return noiseArray;
+        },
         createReverb: async () => {
             // this.convolver = this.actx.createConvolver();
 
@@ -78,6 +158,78 @@ function MidiSynthCore(target){
         //     }
         //     return curve;
         // },
+        playBassDrum: (velocity = 100, t, f1 = 100, f2 = 60, duration = 0.4, transientDur = 0.015, fd = 0.15, bpf = 1000) => {
+            const now = this._tsConv(t);
+            const vNorm = Math.max(0.05, Math.min(velocity, 127)) * this.inv127;
+
+            // 新建 Oscillator 和 GainNode
+            const osc = this.actx.createOscillator();
+            const gainOsc = this.actx.createGain();
+
+            // 取消之前頻率排程，避免遺留影響
+            osc.frequency.cancelScheduledValues(now);
+            osc.frequency.setValueAtTime(f1, now); // 100
+            osc.frequency.exponentialRampToValueAtTime(f2, now + fd); // 60  0.15
+
+            gainOsc.gain.setValueAtTime(0.0001, now);
+            gainOsc.gain.exponentialRampToValueAtTime(vNorm, now + 0.005);
+            gainOsc.gain.exponentialRampToValueAtTime(0.001, now + duration); // 0.4
+
+            const highShelf = this.actx.createBiquadFilter();
+            highShelf.type = 'highshelf';
+            highShelf.frequency.setValueAtTime(2500, now);
+            highShelf.gain.setValueAtTime(2.5, now);
+
+            osc.connect(gainOsc).connect(highShelf);
+            highShelf.connect(this.softLimiter[9]);
+
+            // Transient 相關同理
+            const noiseBuffer = this.actx.createBuffer(1, this.actx.sampleRate * transientDur, this.actx.sampleRate); // 0.15
+            const noiseData = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < noiseData.length; i++) {
+                noiseData[i] = (Math.random() * 2 - 1) * Math.exp(-i / (this.actx.sampleRate * 0.0025));
+            }
+            const noise = this.actx.createBufferSource();
+            noise.buffer = noiseBuffer;
+
+            const gainNoise = this.actx.createGain();
+            gainNoise.gain.setValueAtTime(vNorm * 0.25, now);
+            gainNoise.gain.exponentialRampToValueAtTime(0.001, now + transientDur);
+
+            const bandpass = this.actx.createBiquadFilter();
+            bandpass.type = 'bandpass';
+            bandpass.frequency.setValueAtTime(bpf, now); // 1200
+            bandpass.Q.setValueAtTime(1.5, now);
+
+            noise.connect(gainNoise).connect(bandpass);
+            bandpass.connect(this.softLimiter[9]);
+
+            // 播放與清理
+            osc.start(now);
+            osc.stop(now + duration);
+            noise.start(now);
+            noise.stop(now + transientDur);
+
+            osc.onended = () => {
+                osc.disconnect();
+                gainOsc.disconnect();
+                highShelf.disconnect();
+            };
+            noise.onended = () => {
+                noise.disconnect();
+                gainNoise.disconnect();
+                bandpass.disconnect();
+            };
+
+        },
+
+
+
+
+
+
+
+
         init:()=>{
             this.pg=[]; this.vol=[]; this.ex=[]; this.bend=[]; this.rpnidx=[]; this.brange=[];
             this.sustain=[]; this.notetab=[]; this.rhythm=[];
@@ -456,18 +608,44 @@ function MidiSynthCore(target){
             }
         },
         noteOn:(ch, note, vel, t)=>{
+            if(this.debug)
+                console.log("noteOn:", ch, note, vel, t);
             if(vel==0){
                 this.noteOff(ch,note,t);
                 return;
             }
 
+            t=this._tsConv(t);
+
             if(ch==9){
+                switch(note){
+                    // playBassDrum(vel, t, f1, f2, dur, t_dur, df_dur, bpf)
+                    case 35:
+                        this.playBassDrum(vel, t, 80, 60); break;
+                    case 36:
+                        this.playBassDrum(vel, t, 100, 80); break;
+                    case 38:
+                        this.playBassDrum(vel, t, 220, 180); break;
+                    case 40:
+                        this.playBassDrum(vel, t, 250, 200); break;
+                    case 41:
+                        this.playBassDrum(vel, t, 110, 70, 0.75, 0.06, 0.45, 1400); break;
+                    case 43:
+                        this.playBassDrum(vel, t, 140, 110); break;
+                    case 45:
+                        this.playBassDrum(vel, t, 180, 140); break;
+                    case 48:
+                        this.playBassDrum(vel, t, 200, 150, 0.75, 0.06, 0.3, 280); break;
+                    case 37:
+                        this.playBassDrum(vel, t, 800, 750, 0.15, 0.03); break;
+                    case 63:
+                        this.playBassDrum(vel, t, 300, 200, 0.15, 0.03); break;
+                }
+
                 return;
             }
 
-            t=this._tsConv(t);
-            if(this.debug)
-                console.log("noteOn:", ch, note, vel, t);
+            
             if(this.pg[ch]==-1)
                 this._note(t,ch,note,vel);
             else {
@@ -484,7 +662,7 @@ function MidiSynthCore(target){
                                         nn * (1 - this.options[ch].stringDamping) * 0.5 +
                                         (1 - this.options[ch].stringDamping) *
                                         Math.random() * this.options[ch].stringDampingVariation;
-                this.seedNoise[ch] = this.generateSeedNoise(65535, Math.round(sampleRate/f));
+                this.seedNoise[ch] = this.generateSeedPinkNoise(65535, Math.round(sampleRate/f));
                  // 0.5 + (note / 127 - 0.5) * 0.9
                 // this.options[ch].stringTension = 1 + ((note * this.inv127) * -0.9);
                 // this.options.stringTension = 0.9 * (1 - Math.pow((note * this.inv127), 1.5));
@@ -494,7 +672,7 @@ function MidiSynthCore(target){
                     sampleRate,
                     f,
                     smoothingFactor,
-                    vel/4,
+                    vel/4.0,
                     this.options[ch],
                     0.2
                 );
@@ -575,8 +753,8 @@ function MidiSynthCore(target){
 
             this.setMasterVol();
 
-            this.revg.gain.setValueAtTime(0.09, this.actx.currentTime);
-            this.outg.gain.setValueAtTime(0.15, this.actx.currentTime);
+            this.revg.gain.setValueAtTime(0.9, this.actx.currentTime); // 0.09
+            this.outg.gain.setValueAtTime(0.5, this.actx.currentTime); // 0.15
             (async () => {
                 await this.createReverb(); // ✅ 確保等到 ConvolverNode 回來
                 if (!this.audioBuffer) {
@@ -596,7 +774,7 @@ function MidiSynthCore(target){
             this.revg.connect(this.out);
             this.comp.connect(this.dest);
             this.chvol=[]; this.chmod=[]; this.chpan=[]; this.conv=[]; this.shap=[]; this.revDelay=[];
-            this.oldGain=[]; this.preGain=[]; this.postShaperGain=[]; this.dryLowGain=[]; this.shapGain=[];
+            this.oldGain=[]; this.preGain=[]; this.postShaperGain=[]; this.dryLowGain=[]; this.shapGain=[]; this.dry=[]; this.wet=[];
             this.postFilter=[]; this.warmthBoost=[]; this.lpf=[]; this.hpf=[]; this.shapLpf=[]; this.highBoost=[]; this.softLimiter=[];
             this.lfo=this.actx.createOscillator();
             this.lfo.frequency.value=5;
@@ -608,6 +786,14 @@ function MidiSynthCore(target){
 
                 this.revDelay[i]=this.actx.createDelay();
                 this.revDelay[i].delayTime.setValueAtTime(0.01, this.actx.currentTime);
+
+                this.wet[i]=this.actx.createGain();
+                this.dry[i]=this.actx.createGain();
+                this.wet[i].connect(this.out);
+                this.dry[i].connect(this.out);
+
+                this.wet[i].gain.setValueAtTime(0.09, this.actx.currentTime); // 0.09
+                this.dry[i].gain.setValueAtTime(0.15, this.actx.currentTime); // 0.15
 
                 this.shap[i]=this.actx.createWaveShaper();
                 this.shap[i].curve = this.makeAcousticGuitarShaper();
@@ -684,14 +870,55 @@ function MidiSynthCore(target){
                 this.preGain[i].connect(this.hpf[i]).connect(this.shap[i]).connect(this.postFilter[i]).connect(this.warmthBoost[i]).connect(this.highBoost[i]).connect(this.shapGain[i]).connect(this.softLimiter[i]).connect(this.shapLpf[i]).connect(this.postShaperGain[i]);
                 this.preGain[i].connect(this.lpf[i]).connect(this.dryLowGain[i]).connect(this.postShaperGain[i]);
 
-                this.postShaperGain[i].connect(this.outg);
-                this.postShaperGain[i].connect(this.revDelay[i]).connect(this.conv[i]).connect(this.revg);
+                this.postShaperGain[i].connect(this.dry[i]);
+                this.postShaperGain[i].connect(this.revDelay[i]).connect(this.conv[i]).connect(this.wet[i]);
 
                 this.chmod[i]=this.actx.createGain();
                 this.lfo.connect(this.chmod[i]);
                 // this.pg[i]=0;
                 this.resetAllControllers(i);
             }
+
+            this.wet[9].gain.setValueAtTime(0.9, this.actx.currentTime); 
+            this.dry[9].gain.setValueAtTime(0.1, this.actx.currentTime); 
+
+            this.softLimiter[9].disconnect();
+            this.softLimiter[9].connect(this.postShaperGain[9]);
+
+            const duration = 1;
+            const sampleRate = this.actx.sampleRate;
+            const length = sampleRate * duration;
+            const irBuffer = this.actx.createBuffer(2, length, sampleRate);
+
+            for (let ch = 0; ch < 2; ch++) {
+                const channelData = irBuffer.getChannelData(ch);
+                for (let i = 0; i < length; i++) {
+                    const t = i / sampleRate;
+                    const decay = Math.exp(-t * 6);
+                    const hfAttenuation = 1 - Math.pow(t / duration, 3);
+                    channelData[i] = (Math.random() * 2 - 1) * decay * hfAttenuation * 0.4;
+                }
+            }
+
+            // 建立 OfflineAudioContext 用來濾波 IR
+            const offlineCtx = new OfflineAudioContext(2, length, sampleRate);
+
+            const bufferSource = offlineCtx.createBufferSource();
+            bufferSource.buffer = irBuffer;
+
+            const lowpass = offlineCtx.createBiquadFilter();
+            lowpass.type = 'lowpass';
+            lowpass.frequency.value = 1200; // 調整頻率控制保留多少高頻
+
+            bufferSource.connect(lowpass);
+            lowpass.connect(offlineCtx.destination);
+
+            bufferSource.start();
+
+            offlineCtx.startRendering().then(filteredBuffer => {
+                this.conv[9].buffer = filteredBuffer;
+            });
+            this.postShaperGain[9].gain.setValueAtTime(1.0, this.actx.currentTime);
         }
     });
 }
