@@ -232,7 +232,7 @@ function MidiSynthCore(target){
 
         init:()=>{
             this.pg=[]; this.vol=[]; this.ex=[]; this.bend=[]; this.rpnidx=[]; this.brange=[];
-            this.sustain=[]; this.notetab=[]; this.rhythm=[];
+            this.sustain=[]; this.notetab=[]; this.rhythm=[]; this.pedal=[];
             this.masterTuningC=0; this.masterTuningF=0; this.tuningC=[]; this.tuningF=[]; this.scaleTuning=[];
             this.maxTick=0, this.playTick=0, this.playing=0; this.releaseRatio=3.5; 
             this.oscSet=[]; this.bfSet=[]; this.asmWrapper=[]; this.options=[]; this.seedNoise=[];
@@ -245,6 +245,7 @@ function MidiSynthCore(target){
                 this.bend[i]=0; this.brange[i]=0x100;
                 this.pg[i]=0;
                 this.rhythm[i]=0;
+                this.pedal[i]=0;
                 this.oscSet[i]=k;
                 this.bfSet[i]=j;
 
@@ -488,6 +489,9 @@ function MidiSynthCore(target){
             this.ex[ch]=v*v/(127*127);
             this.chvol[ch].gain.setValueAtTime(this.vol[ch]*this.ex[ch],this._tsConv(t));
         },
+        setPedal:(ch,v)=>{
+            this.pedal[ch]=v;
+        },
         allSoundOff:(ch)=>{
             // for(let i=this.notetab.length-1;i>=0;--i){
             //     const nt=this.notetab[i];
@@ -578,10 +582,13 @@ function MidiSynthCore(target){
             //     }
             // }
             
-            // const bfs = this.bfSet[ch][n];
-            // if (bfs instanceof AudioBufferSourceNode) {
-            //         bfs.stop(t);
-            //     }
+            if(this.pedal[ch]<64){
+                const bfs = this.bfSet[ch][n];
+                if(bfs instanceof AudioBufferSourceNode) {
+                    bfs.stop(t+0.02);
+                }
+            }
+            
 
             if(this.oscSet[ch][n]){
 
@@ -650,6 +657,10 @@ function MidiSynthCore(target){
                 this._note(t,ch,note,vel);
             else {
                 // this.actx.resume();
+                const bfs1 = this.bfSet[ch][note];
+                if (bfs1 instanceof AudioBufferSourceNode) {
+                        bfs1.stop(t+0.01);
+                }
                 let f=this.a4_freq * (2 ** ((note - 69) / 12.0));
                 // f = f.toFixed(5);
                 sampleRate = this.actx.sampleRate;
@@ -710,6 +721,7 @@ function MidiSynthCore(target){
                         case 7:  this.setChVol(channel,msg[2],t); break;
                         case 10: this.setPan(channel,msg[2],t); break;
                         case 11: this.setExpression(channel,msg[2],t); break;
+                        case 64: this.setPedal(channel,msg[2]); break;
                         case 120:  /* all sound off */
                         case 123:  /* all notes off */
                         case 124: case 125: case 126: case 127: /* omni off/on mono/poly */
@@ -753,8 +765,8 @@ function MidiSynthCore(target){
 
             this.setMasterVol();
 
-            this.revg.gain.setValueAtTime(0.9, this.actx.currentTime); // 0.09
-            this.outg.gain.setValueAtTime(0.5, this.actx.currentTime); // 0.15
+            this.revg.gain.setValueAtTime(0.09, this.actx.currentTime); // 0.09
+            this.outg.gain.setValueAtTime(0.15, this.actx.currentTime); // 0.15
             (async () => {
                 await this.createReverb(); // ✅ 確保等到 ConvolverNode 回來
                 if (!this.audioBuffer) {
