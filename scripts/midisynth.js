@@ -673,7 +673,7 @@ function MidiSynthCore(target){
                                         nn * (1 - this.options[ch].stringDamping) * 0.5 +
                                         (1 - this.options[ch].stringDamping) *
                                         Math.random() * this.options[ch].stringDampingVariation;
-                this.seedNoise[ch] = this.generateSeedPinkNoise(65535, Math.round(sampleRate/f));
+                this.seedNoise[ch] = this.generateSeedBrownNoise(65535, Math.round(sampleRate/f));
                  // 0.5 + (note / 127 - 0.5) * 0.9
                 // this.options[ch].stringTension = 1 + ((note * this.inv127) * -0.9);
                 // this.options.stringTension = 0.9 * (1 - Math.pow((note * this.inv127), 1.5));
@@ -853,10 +853,10 @@ function MidiSynthCore(target){
                 this.dryLowGain[i].gain.setValueAtTime(0.3, this.actx.currentTime);
 
                 this.shapGain[i] = this.actx.createGain();
-                this.shapGain[i].gain.setValueAtTime(0.15, this.actx.currentTime);
+                this.shapGain[i].gain.setValueAtTime(0.2, this.actx.currentTime);
 
                 this.oldGain[i] = this.actx.createGain();
-                this.oldGain[i].gain.setValueAtTime(0.15, this.actx.currentTime);
+                this.oldGain[i].gain.setValueAtTime(0.5, this.actx.currentTime);
 
                 this.softLimiter[i] = this.actx.createWaveShaper();
                 this.softLimiter[i].curve = this.makeLimiterCurve();
