@@ -289,7 +289,7 @@ function MidiSynthCore(target){
             }
             this.isReady=1;
 
-            console.log("Midi_Synth v0.1.2 Ready");
+            console.log("Midi_Synth v0.1.3 Ready");
         },
         setMasterVol:(v)=>{
             if(v!=undefined)
@@ -804,8 +804,8 @@ function MidiSynthCore(target){
                 this.wet[i].connect(this.out);
                 this.dry[i].connect(this.out);
 
-                this.wet[i].gain.setValueAtTime(0.09, this.actx.currentTime); // 0.09
-                this.dry[i].gain.setValueAtTime(0.15, this.actx.currentTime); // 0.15
+                this.wet[i].gain.setValueAtTime(0.27, this.actx.currentTime); // 0.09
+                this.dry[i].gain.setValueAtTime(0.45, this.actx.currentTime); // 0.15
 
                 this.shap[i]=this.actx.createWaveShaper();
                 this.shap[i].curve = this.makeAcousticGuitarShaper();
