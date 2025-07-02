@@ -582,7 +582,8 @@ function MidiSynthCore(target){
             //     }
             // }
             
-            if(this.pedal[ch]<64){
+            // console.log("pedal:", this.pedal[ch]);
+            if(this.pedal[ch] < 64){
                 const bfs = this.bfSet[ch][n];
                 if(bfs instanceof AudioBufferSourceNode) {
                     bfs.stop(t+0.02);
@@ -659,7 +660,7 @@ function MidiSynthCore(target){
                 // this.actx.resume();
                 const bfs1 = this.bfSet[ch][note];
                 if (bfs1 instanceof AudioBufferSourceNode) {
-                        bfs1.stop(t+0.01);
+                        bfs1.stop(t+0.02);
                 }
                 let f=this.a4_freq * (2 ** ((note - 69) / 12.0));
                 // f = f.toFixed(5);
@@ -804,8 +805,8 @@ function MidiSynthCore(target){
                 this.wet[i].connect(this.out);
                 this.dry[i].connect(this.out);
 
-                this.wet[i].gain.setValueAtTime(0.27, this.actx.currentTime); // 0.09
-                this.dry[i].gain.setValueAtTime(0.45, this.actx.currentTime); // 0.15
+                this.wet[i].gain.setValueAtTime(0.12, this.actx.currentTime); // 0.09
+                this.dry[i].gain.setValueAtTime(0.2, this.actx.currentTime); // 0.15
 
                 this.shap[i]=this.actx.createWaveShaper();
                 this.shap[i].curve = this.makeAcousticGuitarShaper();
