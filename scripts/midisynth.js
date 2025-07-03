@@ -571,6 +571,13 @@ function MidiSynthCore(target){
             });
 
         },
+        setPG:(ch, v)=>{
+            this.pg[ch]=v;
+        },
+        setChannelAfterTouch:(channel,v,t)=>{
+            this.vol[channel]=3*v*v/(127*127);
+            this.chvol[channel].gain.exponentialRampToValueAtTime(this.vol[channel]*this.ex[channel],this._tsConv(t));
+        },
         noteOff:(ch, n, t)=>{
             t=this._tsConv(t);
             // for(let i=this.notetab.length-1;i>=0;--i){
@@ -586,7 +593,11 @@ function MidiSynthCore(target){
             if(this.pedal[ch] < 64){
                 const bfs = this.bfSet[ch][n];
                 if(bfs instanceof AudioBufferSourceNode) {
-                    bfs.stop(t+0.02);
+                    switch(this.pg[ch]){
+                        case 24: case 25: bfs.stop(t+0.02); break;
+                        default: bfs.stop(t+0.4); break;
+                    }
+                    return;
                 }
             }
             
@@ -660,7 +671,12 @@ function MidiSynthCore(target){
                 // this.actx.resume();
                 const bfs1 = this.bfSet[ch][note];
                 if (bfs1 instanceof AudioBufferSourceNode) {
-                        bfs1.stop(t+0.02);
+                    // switch(this.pg[ch]){
+                    //     case 24:case 25: bfs1.stop(t+0.02); break;
+                    //     default: bfs1.stop(t+0.02); break;
+                    // }
+
+                    bfs1.stop(t+0.02);
                 }
                 let f=this.a4_freq * (2 ** ((note - 69) / 12.0));
                 // f = f.toFixed(5);
@@ -731,6 +747,8 @@ function MidiSynthCore(target){
                         case 121: this.resetAllControllers(channel); break;
                     }
                     break;
+                case 0xc0: this.setPG(channel,msg[1]); break;
+                case 0xd0: this.setChannelAfterTouch(channel,msg[1],t); break;
                 case 0xe0: this.setBend(channel,(msg[1]+(msg[2]<<7)),t); break;
                 case 0x90: this.noteOn(channel,msg[1],msg[2],t); break;
                 case 0x80: this.noteOff(channel,msg[1],t); break;
@@ -929,6 +947,9 @@ function MidiSynthCore(target){
             bufferSource.start();
 
             offlineCtx.startRendering().then(filteredBuffer => {
+                // for(let i=0;i<16;++i){
+                //     this.conv[i].buffer = filteredBuffer;
+                // }
                 this.conv[9].buffer = filteredBuffer;
             });
             this.postShaperGain[9].gain.setValueAtTime(1.0, this.actx.currentTime);
