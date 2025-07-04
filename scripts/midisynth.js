@@ -1,3 +1,7 @@
+import { IRs } from './IRbase64.js';
+import { AsmFunctionsWrapper } from './guitarstring_asm.js';
+
+
 function MidiSynthCore(target){
     Object.assign(target,{
         properties:{
@@ -113,7 +117,7 @@ function MidiSynthCore(target){
             // this.convolver = this.actx.createConvolver();
 
             try {
-                const response = await fetch("data:audio/wav;base64," + IR_Gibson);
+                const response = await fetch("data:audio/wav;base64," + IRs.IR_Gibson);
                 const arraybuffer = await response.arrayBuffer();
                 this.audioBuffer = await this.actx.decodeAudioData(arraybuffer);
                 // this.convolver.buffer = audioBuffer;
@@ -240,7 +244,8 @@ function MidiSynthCore(target){
             this.inv127 = 1 / 127;
 
             for(let i=0;i<16;++i){
-                let k=[];j=[];
+                let k=[];
+                let j=[];
                 this.vol[i]=3*100*100/(127*127);
                 this.bend[i]=0; this.brange[i]=0x100;
                 this.pg[i]=0;
@@ -680,7 +685,7 @@ function MidiSynthCore(target){
                 }
                 let f=this.a4_freq * (2 ** ((note - 69) / 12.0));
                 // f = f.toFixed(5);
-                sampleRate = this.actx.sampleRate;
+                let sampleRate = this.actx.sampleRate;
                 let bf = this.actx.createBuffer(2, this.actx.sampleRate, this.actx.sampleRate);
                 let nn = Math.pow(note/64, 0.5);
                 if(!nn) nn = 0;
@@ -966,3 +971,7 @@ class MidiSynth {
         this.init();
     }
 }
+
+export default MidiSynth;
+
+window.MidiSynth = MidiSynth;

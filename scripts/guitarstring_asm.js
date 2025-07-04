@@ -1,4 +1,4 @@
-function AsmFunctionsWrapper() {
+export function AsmFunctionsWrapper() {
 }
 
 AsmFunctionsWrapper.prototype.initAsm = function(heapSize) {
@@ -470,6 +470,86 @@ function asmFunctions(stdlib, foreign, heapBuffer) {
             lastOutputSample = curOutputSample;
         }
     }
+
+    // ------------------------------------------------------------------------------------------
+    // function renderKarplusStrong(
+    // seedNoiseStart,
+    // seedNoiseEnd,
+    // targetArrayStart,
+    // targetArrayEnd,
+    // sampleRate, hz, velocity,
+    // smoothingFactor, stringTension,
+    // pluckDamping,
+    // pluckDampingVariation,
+    // characterVariation
+    // ) {
+    //     seedNoiseStart = seedNoiseStart|0;
+    //     seedNoiseEnd = seedNoiseEnd|0;
+    //     targetArrayStart = targetArrayStart|0;
+    //     targetArrayEnd = targetArrayEnd|0;
+    //     sampleRate = sampleRate|0;
+    //     hz = +hz;
+    //     velocity = +velocity;
+    //     smoothingFactor = +smoothingFactor;
+    //     stringTension = +stringTension;
+    //     pluckDamping = +pluckDamping;
+    //     pluckDampingVariation = +pluckDampingVariation;
+    //     characterVariation = +characterVariation;
+
+    //     var period = 1.0 / hz;
+    //     var periodSamples = ~~(+Math.round(period * +(sampleRate>>>0)));
+    //     var sampleCount = (targetArrayEnd - targetArrayStart + 1) | 0;
+
+    //     var pluckDampingMin = 0.1;
+    //     var pluckDampingMax = 0.9;
+    //     var pluckDampingVariationMin =
+    //         pluckDamping - (pluckDamping - pluckDampingMin) * pluckDampingVariation;
+    //     var pluckDampingVariationMax =
+    //         pluckDamping + (pluckDampingMax - pluckDamping) * pluckDampingVariation;
+    //     var pluckDampingVariationDifference =
+    //         pluckDampingVariationMax - pluckDampingVariationMin;
+    //     var pluckDampingCoefficient =
+    //         pluckDampingVariationMin + (Math.random()) * pluckDampingVariationDifference;
+
+    //     var lastOutputSample = 0.0;
+    //     var curInputSample = 0.0;
+    //     var noiseSample = 0.0;
+
+    //     // 新增：限制 stringTension 只影響 delay 回讀位置的微調範圍
+    //     // 這裡設為最多影響 +/- 5% delay 長度 (可依需求調整)
+    //     var maxTensionOffset = Math.floor(periodSamples * 0.05); 
+    //     // 計算實際跳過的樣本數（在 periodSamples 範圍內微調）
+    //     // stringTension 範圍假設是 0 ~ 1，0.5 時無偏移
+    //     var tensionOffset = Math.floor((stringTension - 0.5) * 2 * maxTensionOffset);
+
+    //     for (var targetIndex = 0; targetIndex < sampleCount; targetIndex++) {
+    //         var heapTargetIndexBytes = (targetArrayStart + targetIndex) << 2;
+
+    //         if (targetIndex < periodSamples) {
+    //             // 第一個 period 用 noise 填充
+    //             var heapNoiseIndexBytes = (seedNoiseStart + targetIndex) << 2;
+    //             noiseSample = +heap[heapNoiseIndexBytes >> 2];
+    //             noiseSample = noiseSample * (1.0 - characterVariation);
+    //             noiseSample = noiseSample + characterVariation * (-1.0 + 2.0 * (Math.random()));
+    //             noiseSample = noiseSample * velocity;
+    //             curInputSample = +lowPass(curInputSample, noiseSample, pluckDampingCoefficient);
+    //         } else {
+    //             // 從上一個 period 回讀並微調 offset
+    //             var lastPeriodStartIndexBytes = (heapTargetIndexBytes - (periodSamples << 2)) | 0;
+    //             var adjustedIndex = lastPeriodStartIndexBytes + ((tensionOffset + targetIndex % periodSamples) << 2);
+
+    //             // 確保不超出範圍
+    //             if (adjustedIndex < 0) adjustedIndex = lastPeriodStartIndexBytes;
+    //             if (adjustedIndex >= heap.length * 4) adjustedIndex = lastPeriodStartIndexBytes;
+
+    //             curInputSample = +heap[adjustedIndex >> 2];
+    //         }
+
+    //         var curOutputSample = +lowPass(lastOutputSample, curInputSample, smoothingFactor);
+    //         heap[heapTargetIndexBytes >> 2] = curOutputSample;
+    //         lastOutputSample = curOutputSample;
+    //     }
+    // }
 
     function renderDecayedSine(
                                targetArrayStart,

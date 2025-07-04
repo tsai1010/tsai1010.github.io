@@ -24,7 +24,7 @@ startAudio.addEventListener('click', ()=>{
         // ctx.audioWorklet.addModule('scripts/highpass-processor.js');
         // ctx.audioWorklet.addModule('scripts/lowpass-processor.js');
         // ctx.audioWorklet.addModule('scripts/karplus-echo-processor.js');
-        midi_synth = new MidiSynth();
+        midi_synth = new window.MidiSynth();
         midi_synth.setAudioContext(ctx, ctx.destination);
         console.log(ctx);
     }
@@ -182,7 +182,7 @@ function handleInput(input){
     if(playInput)
         midi_synth.send(input.data);
 
-    // console.log(`command: ${command}, channel: ${channel}, note: ${note}, velocity: ${velocity}`);
+    console.log(`command: ${command}, channel: ${channel}, note: ${note}, velocity: ${velocity}`);
 
     if(note>20&&note<109){
         if(command==8) {
