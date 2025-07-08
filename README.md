@@ -10,7 +10,7 @@
 ### reset()  
       Reset all channel to initial state. Including all controllers, program, chVol, pan and bendRange.
 ### setMasterVol(value)  
-      Master volume setting. default=0.5. Range: 0~1
+      Master volume setting. default=0.3. Range: 0~1
 ### setA4freq(value)  
       A4 frequency setting. it's used for convert note-number to frequency.
 ### resetAllControllers(ch)  
