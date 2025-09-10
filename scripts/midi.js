@@ -1,27 +1,23 @@
-window.AudioContext = window.AudioContext || window.webkitAudioContext;
-
 let ctx;
 let ctxStart = false;
 let midi_synth;
-const oscSet = {};
-const midiInputs = {};
 
-// 初始化函式（只會執行一次）
 function initAudio() {
   if (!ctxStart) {
-    ctx = new AudioContext();
+    // ⚡ 確保只在互動後才建立
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
     midi_synth = new window.MidiSynth();
     midi_synth.setAudioContext(ctx, ctx.destination);
     ctxStart = true;
     console.log("AudioContext 已啟動:", ctx);
 
-    // 🔊 測試一個 440Hz 正弦波 (1 秒)
+    // 🔊 測試一個 440Hz 正弦波 (2 秒)
     const osc = ctx.createOscillator();
     osc.type = "sine";
     osc.frequency.value = 440;
     osc.connect(ctx.destination);
     osc.start();
-    osc.stop(ctx.currentTime + 1);
+    osc.stop(ctx.currentTime + 2);
   } else if (ctx.state === "suspended") {
     ctx.resume().then(() => {
       console.log("AudioContext 已恢復");
@@ -29,9 +25,9 @@ function initAudio() {
   }
 }
 
-// 🔹 綁定事件（保險起見同時綁 click + touchstart）
-document.addEventListener("click", initAudio, { once: false });
-document.addEventListener("touchstart", initAudio, { once: false });
+// 🔹 綁定事件（click + touchstart，確保行動裝置能觸發）
+document.addEventListener("click", initAudio, { once: true });
+document.addEventListener("touchstart", initAudio, { once: true });
 
 function setMasterV(value){
     midi_synth.setMasterVol(value);
@@ -739,5 +735,4 @@ function oscCreate(freq, velocityAmount, decay_time, filter, ff, width=10){
     feedback.gain.linearRampToValueAtTime(0, currentTime + width/1000);
 
     return osc;
-
 }
