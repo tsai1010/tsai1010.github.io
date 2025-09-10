@@ -9,14 +9,20 @@ const midiInputs = {};
 // 初始化函式（只會執行一次）
 function initAudio() {
   if (!ctxStart) {
-    // 在用戶互動後才建立 AudioContext
     ctx = new AudioContext();
     midi_synth = new window.MidiSynth();
     midi_synth.setAudioContext(ctx, ctx.destination);
     ctxStart = true;
     console.log("AudioContext 已啟動:", ctx);
+
+    // 🔊 測試一個 440Hz 正弦波 (1 秒)
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.value = 440;
+    osc.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 1);
   } else if (ctx.state === "suspended") {
-    // 有時候平板會把 ctx 自動暫停，這裡補救
     ctx.resume().then(() => {
       console.log("AudioContext 已恢復");
     });
@@ -733,4 +739,5 @@ function oscCreate(freq, velocityAmount, decay_time, filter, ff, width=10){
     feedback.gain.linearRampToValueAtTime(0, currentTime + width/1000);
 
     return osc;
+
 }
