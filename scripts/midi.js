@@ -11,13 +11,12 @@ function initAudio() {
     ctxStart = true;
     console.log("AudioContext 已啟動:", ctx);
 
-    // 🔊 測試一個 440Hz 正弦波 (2 秒)
+    // 在 initAudio() 裡加上：
     const osc = ctx.createOscillator();
-    osc.type = "sine";
-    osc.frequency.value = 440;
-    osc.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 2);
+    const gain = ctx.createGain();
+    gain.gain.value = 0; // 完全靜音
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(); // 不停播，保持 Context 活著
   } else if (ctx.state === "suspended") {
     ctx.resume().then(() => {
       console.log("AudioContext 已恢復");
@@ -735,4 +734,5 @@ function oscCreate(freq, velocityAmount, decay_time, filter, ff, width=10){
     feedback.gain.linearRampToValueAtTime(0, currentTime + width/1000);
 
     return osc;
+
 }
