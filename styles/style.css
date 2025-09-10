@@ -1,3 +1,11 @@
+/* 支援 clip 的瀏覽器（不占位、比 hidden 更穩） */
+html, body { overflow-x: clip; }
+
+/* 後備：Safari 等不支援 clip 的用 hidden */
+@supports not (overflow: clip) {
+  html, body { overflow-x: hidden; }
+}
+
 html {
     height: 100%;
     z-index: -100;
@@ -72,12 +80,18 @@ body h1 {
     margin-left: 0.33%;
     margin-right: 0.33%;
     z-index: 3;
+    border-bottom-right-radius: 45% 7.5%;
+    border-bottom-left-radius: 45% 7.5%;
+    overflow: hidden;         /* 確保特效不溢出到隔壁鍵 */
+    contain: paint;           /* 單鍵內部的特效不影響外界 */
 }
 #whiteKey {
     background: white;
     flex: auto;
     border: 1px solid black;
     z-index: 1;
+    overflow: hidden;         /* 確保特效不溢出到隔壁鍵 */
+    contain: paint;           /* 單鍵內部的特效不影響外界 */
 }
 #noKey {
     background: white;
@@ -175,3 +189,15 @@ input[type="range"]::-webkit-slider-thumb{
     width: auto;
     display: inline-block;
 }
+
+
+#player-slot {
+  position: fixed;
+  left: 50%;
+  bottom: 20%;
+  transform: translateX(-50%);
+  z-index: 3;
+}
+#player-slot .pui-wrap { margin:0; }
+
+.pui-loop.is-on { color: #22d3ee; }
