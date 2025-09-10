@@ -4,6 +4,9 @@ let ctx;
 let ctxStart = false;
 let midi_synth;
 
+const midiInputs = {};
+const oscSet = {};
+
 function initAudio() {
   if (!ctxStart) {
     // ⚡ 只在第一次點擊 / 觸控後建立
@@ -738,6 +741,4 @@ function oscCreate(freq, velocityAmount, decay_time, filter, ff, width=10){
     feedback.gain.linearRampToValueAtTime(0, currentTime + width/1000);
 
     return osc;
-
 }
-
