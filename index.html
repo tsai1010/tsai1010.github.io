@@ -1,125 +1,33 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="utf-8" />
-    <title>MIDI Synthesizer Test</title>
-    <link rel="icon" href="images/musicsynth_icon.ico" type="image/x-icon">
-    <link rel="stylesheet" href="styles/style.css" />
-  </head>
-  <body>
-    <h1>
-      <strong><em>MIDI Synthesizer</em></strong>
-    </h1>
-    <img src="images/image1.png" width="3%" height="5%" id="img" onmousedown="menuShow();"/>
-    <div class="menu" id="menu">
-      Menu
-      <hr style="margin: 0; border-color: #820041;"/>
-      <div class="menuBar" id="m1" onmouseover="menuBarOver(this);" onmouseout="menuBarOut(this);">
-        <span style="position: absolute; left: 10%; width: 10%; color: black;">MIDI&nbsp;port:</span>
-        <select id="midiInputPort" onchange="midiPortSet(this);">
-          <option value="all">All&nbsp;inputs</option>
-        </select>
-      </div>
-      <div class="menuBar" id="m1" onmouseover="menuBarOver(this);" onmouseout="menuBarOut(this);">
-        <span style="position: absolute; left: 10%; width: 10%; color: black;">Audio:</span>
-        <input class="menuSet" id="audioValue" type="range" min="0" max="1" step="0.01" value="0.3"/>
-        <img src="images/AudioOff.png" width="7%" height="100%" id="AudioImg" onmousedown="AudioBtn();"/>
-      </div>
-      <div class="menuBar" id="m1" onmouseover="menuBarOver(this);" onmouseout="menuBarOut(this);">
-        <span style="position: absolute; left: 10%; width: 10%; color: black;">Tune:</span>
-        <input class="menuSet" id="tuneValue" type="range" min="420" max="460" step="1" value="440"/>
-        <span style="position: absolute; right: 17.5%; width: 7%; height: 100%; color: black;" id="tuneFreq">440Hz</span>
-      </div>
-      <div class="menuBar" id="m1" onmouseover="menuBarOver(this);" onmouseout="menuBarOut(this);">
-        
-      </div>
-      <div id="midi-ui"></div>
-      
+<head>
+  <meta charset="UTF-8">
+  <title>Audio Test</title>
+</head>
+<body>
+  <button id="startBtn">🔊 點我啟動聲音</button>
 
-    </div>
+  <script>
+    let ctx;
+    let osc;
 
-    <div id="player-slot"></div>
+    document.getElementById("startBtn").addEventListener("click", () => {
+      if (!ctx) {
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
 
-    <div id="piano">
-      <div id="KeyboardB"></div>
-      <div id="KeyboardW"></div>
-    </div>
-    <div id="floor"></div>
-    <script type="module">
-      import MidiSynth from 'https://tsai1010.github.io/scripts/midisynth.js';
-    </script>
+        // 建立一個持續播放的正弦波
+        osc = ctx.createOscillator();
+        osc.type = "sine";
+        osc.frequency.value = 440; // A4
+        osc.connect(ctx.destination);
+        osc.start();
 
-
-
-    <script src="scripts/data.js"></script>
-    <script src="scripts/main.js"></script>
-    <script src="scripts/midi.js"></script>
-
-    <script src="scripts/midiplayerUI.js"></script>
-    <script src="scripts/player-ui.js"></script>
-
-   <script>
-      // --- 隱藏掛載 midiplayerUI，拿到它的 player ---
-      const hidden = document.createElement('div');
-      hidden.style.display = 'none';
-      document.body.appendChild(hidden);
-      const mfp = MidiFilePlayerUI.mount(hidden); // 回傳 { player, elements }
-
-      // 追蹤目前位置（midiplayerUI 沒有 getPosition，我們用 onTime 回填）
-      let lastPosMs = 0;
-      let endedCb = null;
-      mfp.player.onTime((curMs, durMs) => {
-        lastPosMs = curMs;
-        // 自行判斷「自然播畢」以通知 PlayerUI（非循環）
-        if (!mfp.player.isLoop() && durMs > 0 && curMs >= durMs - 1) {
-          if (endedCb) { endedCb(); endedCb = null; }
-        }
-      });
-
-      // --- 把 midiplayerUI 的 player 包成 PlayerUI 需要的 adapter ---
-      const adapter = {
-        play:  () => mfp.player.play(),
-        pause: () => mfp.player.pause(),
-        stop:  () => mfp.player.stop(),
-        seek:  (seconds) => mfp.player.seek(seconds * 1000),         // PlayerUI 用秒，midiplayerUI 用毫秒
-        getDuration: () => mfp.player.getDuration() / 1000,          // 轉成秒
-        getPosition: () => lastPosMs / 1000,                         // 用 onTime 追蹤的位置
-        setLoop: (on) => mfp.player.setLoop(on),
-        onEnded: (cb) => { endedCb = cb; }                           // 讓 PlayerUI 能收到 ended
-      };
-
-      // --- 掛載樣式6 UI，並將載檔流程指到 midiplayerUI 的 SMF 解析 ---
-      PlayerUI.mount('#player-slot', {
-        adapter,
-        keyboardSelector: '.keyboard', // Reset 閃爍的容器（可換成你的）
-        async loadFile(file) {
-          const buf = await file.arrayBuffer();
-          const parsed = MidiFilePlayerUI.parseSMF(buf);
-          mfp.player.load(parsed);
-        },
-        // 讓檔名前後各補 8 個不斷行空白（播放時才補，暫停/停止自動還原）
-        titlePadSpaces: 8,
-        // 右外/左外多跑的距離（單位 px）
-        marqueeMarginPx: 20,
-        // 中央慢區域的寬度（單位 px）
-        marqueeSlowZonePx: 120
-      });
-
-    </script>
-
-    <style>
-      #player-slot .pui-wrap{
-        --pui-max: clamp(320px, 90vw, 640px);
-        width: var(--pui-max);
-        margin: 40px auto;
-        display: grid;
-        justify-items: center;
+        console.log("AudioContext 已啟動，正在播放 440Hz 測試音...");
+      } else if (ctx.state === "suspended") {
+        ctx.resume();
+        console.log("AudioContext 已恢復");
       }
-      #player-slot .pui-player{ width: 100%; }
-      #player-slot .pui-titleRow,
-      #player-slot .pui-time,
-      #player-slot .pui-seek{ width: 100%; margin-inline: auto; }
-    </style>
-
-  </body>
+    });
+  </script>
+</body>
 </html>
