@@ -8,7 +8,7 @@ function MidiSynthCore(target){
             debug:      {type:Number, value:0},
             masterVol:  {type:Number, value:0.3, observer:"setMasterVol"},
             voices:     {type:Number, value:64},
-            internalcontext: {type:Number, value:1},
+            internalcontext: {type:Number, value:0},
             a4_freq: {type:Number, value:440.0, observer:"setA4freq"},
             harmonic: {type:Number, value:9},
             osc_easing: {type:Number, value:0.0001},
@@ -288,13 +288,13 @@ function MidiSynthCore(target){
 
             if(this.debug)
                 console.log("internalcontext:"+this.internalcontext)
-            if(this.internalcontext){
-                window.AudioContext = window.AudioContext || window.webkitAudioContext;
-                this.setAudioContext(new AudioContext());
-            }
+            // if(this.internalcontext){
+            //     window.AudioContext = window.AudioContext || window.webkitAudioContext;
+            //     this.setAudioContext(new AudioContext());
+            // }
             this.isReady=1;
 
-            console.log("Midi_Synth v0.1.3 Ready");
+            console.log("Midi_Synth v0.1.4 Ready");
         },
         setMasterVol:(v)=>{
             if(v!=undefined)
