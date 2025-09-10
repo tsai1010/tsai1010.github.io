@@ -1,39 +1,31 @@
 window.AudioContext = window.AudioContext || window.webkitAudioContext;
 
-const ctx = new AudioContext();
+let ctx;
 let ctxStart = false;
-
-let inputs;
+let midi_synth;
+const oscSet = {};
 const midiInputs = {};
 
-const startAudio = document.querySelector('body');
-const oscSet = {};
+// 初始化函式（只會執行一次）
+function initAudio() {
+  if (!ctxStart) {
+    // 在用戶互動後才建立 AudioContext
+    ctx = new AudioContext();
+    midi_synth = new window.MidiSynth();
+    midi_synth.setAudioContext(ctx, ctx.destination);
+    ctxStart = true;
+    console.log("AudioContext 已啟動:", ctx);
+  } else if (ctx.state === "suspended") {
+    // 有時候平板會把 ctx 自動暫停，這裡補救
+    ctx.resume().then(() => {
+      console.log("AudioContext 已恢復");
+    });
+  }
+}
 
-let midi_synth;
-
-
-
-startAudio.addEventListener('click', ()=>{
-    if (ctx.state === 'suspended') {
-        ctx.resume();
-    }
-    if(ctxStart==false){
-        // ctx = new AudioContext;
-        ctxStart = true;
-        // ctx.audioWorklet.addModule('scripts/karplus-strong-processor.js');
-        // ctx.audioWorklet.addModule('scripts/highpass-processor.js');
-        // ctx.audioWorklet.addModule('scripts/lowpass-processor.js');
-        // ctx.audioWorklet.addModule('scripts/karplus-echo-processor.js');
-        midi_synth = new window.MidiSynth();
-        midi_synth.setAudioContext(ctx, ctx.destination);
-        console.log(ctx);
-
-    }
-    
-
-
-
-})
+// 🔹 綁定事件（保險起見同時綁 click + touchstart）
+document.addEventListener("click", initAudio, { once: false });
+document.addEventListener("touchstart", initAudio, { once: false });
 
 function setMasterV(value){
     midi_synth.setMasterVol(value);
