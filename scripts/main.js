@@ -52,6 +52,8 @@ function drawBlackkey(){
     }
 }
   
+
+
 function menuShow(){
     const menu = document.querySelector("#menu");
     const img = document.querySelector("#img");
@@ -92,24 +94,58 @@ function midiPortSet(portName){
     setPort(portName.value);
 }
 
-function keyOn(key, note, velocity, color){
+function keyOn(key, note, velocity, channelcolor){
     //console.log(note, velocity);
-    if(key.id=="whiteKey") key.style.background=WkeyColor[color];
-    else if(key.id=="blackKey") key.style.background=BkeyColor[color];
+    if(key.id=="whiteKey") {
+      key.style.background=WkeyColor[channelcolor];
+
+      KeyGradientFX.on(key, {
+        gradient: WkeyColor[channelcolor],
+        velocity,
+        introFromMinLight: true,            // 先「幾乎沒淺色」→ 回到原本比例
+        introDuration: 160,                 // 進場時長（可調 120–260）
+        introTail: { light: 0.8, mid: 1.0, dark: 1.2 }, // 起始尾端三段的窄度（％）
+        floatAmp: 2.5,                      // 在原本比例附近小幅搖動
+        floatHz: 2.5,
+        keepBounce: true
+      });
+
+    }
+    else if(key.id=="blackKey") {
+      key.style.background=BkeyColor[channelcolor];
+
+      KeyGradientFX.on(key, {
+        gradient: BkeyColor[channelcolor],
+        velocity,
+        introFromMinLight: true,            // 先「幾乎沒淺色」→ 回到原本比例
+        introDuration: 240,                 // 進場時長（可調 120–260）
+        introTail: { light: 0.8, mid: 1.0, dark: 1.2 }, // 起始尾端三段的窄度（％）
+        floatAmp: 2.5,                      // 在原本比例附近小幅搖動
+        floatHz: 2.5,
+        keepBounce: true
+      });
+    }
     
-    if(playInput&&color>13) synthOn(note, velocity);
+    if(playInput&&channelcolor>13) synthOn(note, velocity);
     //console.info(key);
 }
 function keyOff(key, note){
-    if(key.id=="whiteKey") key.style.background="white";
-    else if(key.id=="blackKey") key.style.background="black";
+
+  KeyGradientFX.off(key);
+  
+  if(key.id=="whiteKey") key.style.background="white";
+  else if(key.id=="blackKey") key.style.background="black";
     
-    if(playInput) synthOff(note);
+    
+  if(playInput) synthOff(note);
     
 }
 
 document.addEventListener("keydown", (e) => {
-if((e.keyCode>=48&&e.keyCode<=90)||e.keyCode==188) keyOn(document.getElementsByClassName(keyToId[e.keyCode])[0], parseInt(keyToMidi[e.keyCode]), 70, 14);
+if((e.keyCode>=48&&e.keyCode<=90)||e.keyCode==188) {
+  if (e.repeat) return;
+  keyOn(document.getElementsByClassName(keyToId[e.keyCode])[0], parseInt(keyToMidi[e.keyCode]), 70, 14);
+}
 });
 document.addEventListener("keyup", (e) => {
 if((e.keyCode>=48&&e.keyCode<=90)||e.keyCode==188) keyOff(document.getElementsByClassName(keyToId[e.keyCode])[0], parseInt(keyToMidi[e.keyCode]));

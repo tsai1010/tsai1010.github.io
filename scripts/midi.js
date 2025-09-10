@@ -27,6 +27,7 @@ startAudio.addEventListener('click', ()=>{
         midi_synth = new window.MidiSynth();
         midi_synth.setAudioContext(ctx, ctx.destination);
         console.log(ctx);
+
     }
     
 
@@ -179,8 +180,15 @@ function handleInput(input){
     const note = input.data[1];
     const velocity = input.data[2];
 
-    if(playInput)
+    if (typeof playInput !== 'undefined' && playInput) {
         midi_synth.send(input.data);
+    }
+
+    if (command === 11 /* CC */ && (note === 120 || note === 123)) {
+         drainAllNotesOff();
+        console.log(`AllNotesOff: ch=${channel+1} (CC ${note})`);
+        return;
+    }
 
     console.log(`command: ${command}, channel: ${channel}, note: ${note}, velocity: ${velocity}`);
 
@@ -204,6 +212,26 @@ function handleInput(input){
     
 }
 
+function allNotesOff() {
+  for (let note = 21; note <= 108; note++) {
+    const el = document.getElementsByClassName(midiToId[note])?.[0];
+    if (el) {
+      try { keyOff(el, note); } catch (e) {}
+    }
+  }
+}
+
+function drainAllNotesOff() {
+  allNotesOff();                // 立刻
+  setTimeout(allNotesOff, 25);  // 25ms 後再關一次
+  setTimeout(allNotesOff, 120); // 120ms 後再關一次（抓遲到事件）
+}
+
+
+
+
+
+//-----------------------------------------------------------------------------------------------------------------------------//
 function synthOn(n, v){
     if(!oscSet[n.toString()]){
         oscSet[n.toString()] = 1;
@@ -219,6 +247,145 @@ function synthOff(n){
     }
     
 }
+
+
+
+// KeyGradientFX v3 — Intro: from minimal-light → base stops, keep bounce, float around base
+const KeyGradientFX = (() => {
+  const active = new WeakMap();
+  const lerp = (a,b,t)=>a+(b-a)*t;
+  const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
+  const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+
+  // 解析：linear-gradient(<angle>, <c1> p1%, <c2> p2%, <c3> p3%)
+  function parseLinearGradient(str) {
+    if (!/^linear-gradient/i.test(str || '')) return null;
+    const angle = (str.match(/linear-gradient\(\s*([^,]+)\s*,/i)?.[1] || '15deg').trim();
+    const stopRe = /(hsla?\([^)]+\)|rgba?\([^)]+\)|#[0-9a-fA-F]{3,8}|[a-zA-Z]+)\s+(\d+)%/g;
+    const colors=[], stops=[]; let m;
+    while ((m = stopRe.exec(str)) && colors.length < 3) { colors.push(m[1].trim()); stops.push(+m[2]); }
+    if (colors.length !== 3) return null;
+    return { angle, colors, stops };
+  }
+  function build(angle, colors, s) {
+    let {s1,s2,s3}=s;
+    s1 = Math.min(s1, s2-1); s2 = Math.min(s2, s3-1);
+    return `linear-gradient(${angle}, ${colors[0]} ${s1}%, ${colors[1]} ${s2}%, ${colors[2]} ${s3}%)`;
+  }
+
+  // 背景 stops tween（rAF）
+  function tweenStops(el, from, to, duration=160, onFinish) {
+    const st = active.get(el); if (!st) return;
+    if (st.raf) cancelAnimationFrame(st.raf);
+    const t0 = performance.now();
+    const tick = () => {
+      const t = clamp((performance.now() - t0)/duration, 0, 1);
+      const k = easeOutCubic(t);
+      const s = { s1: lerp(from.s1, to.s1, k), s2: lerp(from.s2, to.s2, k), s3: lerp(from.s3, to.s3, k) };
+      el.style.background = build(st.base.angle, st.base.colors, s);
+      st.s = s;
+      if (t < 1) st.raf = requestAnimationFrame(tick);
+      else { st.raf = null; onFinish && onFinish(); }
+    };
+    st.raf = requestAnimationFrame(tick);
+  }
+
+  // 按住期間：在中心 stops 附近做微幅浮動
+  function startFloat(el) {
+    const st = active.get(el); if (!st) return;
+    if (st.raf) cancelAnimationFrame(st.raf);
+    st.t0 = performance.now();
+    const {floatAmp, floatHz, center} = st;
+    const loop = () => {
+      const t = (performance.now() - st.t0)/1000, w = Math.PI*2*floatHz;
+      const s1 = center.s1 + floatAmp* Math.sin(w*t + 0.0);
+      const s2 = center.s2 + (floatAmp*0.7)* Math.sin(w*t + 0.9);
+      const s3 = center.s3 + (floatAmp*0.5)* Math.sin(w*t + 1.7);
+      const s = {
+        s1: clamp(s1, 0, 95),
+        s2: clamp(Math.max(s2, s1 + 3), 3, 97),
+        s3: clamp(Math.max(s3, s2 + 3), 6, 99)
+      };
+      el.style.background = build(st.base.angle, st.base.colors, s);
+      st.s = s;
+      st.raf = requestAnimationFrame(loop);
+    };
+    st.raf = requestAnimationFrame(loop);
+  }
+
+  return {
+    on(el, {
+      gradient,          // 你的原本漸層；不傳則解析元素目前的背景
+      velocity = 100,    // 影響時長/浮動幅度
+      introFromMinLight = true, // ← 新增：一開始幾乎沒有淺色，再回到原本比例
+      introDuration = 140,       // 進場時長（ms；力度會放大）
+      introTail = { light: 0.9, mid: 1.2, dark: 1.4 }, // 起始尾端各段寬度（百分比）
+      floatAmp = 1.2,    // 按住期間浮動幅度（%）
+      floatHz  = 0.7,    // 浮動頻率（Hz）
+      keepBounce = true  // 保留彈跳
+    } = {}) {
+      const baseSpec = parseLinearGradient(gradient) ||
+                       parseLinearGradient(getComputedStyle(el).backgroundImage);
+      if (!baseSpec) return;
+      const v = clamp(velocity,0,127)/127;
+
+      // 清掉前一個
+      const prev = active.get(el);
+      if (prev?.raf) cancelAnimationFrame(prev.raf);
+
+      const base = { angle: baseSpec.angle, colors: baseSpec.colors.slice(), stops: baseSpec.stops.slice() };
+      const sBase = { s1: base.stops[0], s2: base.stops[1], s3: base.stops[2] };
+
+      // 起始：將淺色壓到尾端極小區（幾乎看不到）
+      let sIntro = sBase;
+      if (introFromMinLight) {
+        const lw = introTail.light * (1.0 + 0.6*v); // light 區寬（%）
+        const mw = introTail.mid   * (1.0 + 0.6*v); // mid 區寬
+        const dw = introTail.dark  * (1.0 + 0.6*v); // dark 尾段緩衝
+        const s3 = clamp(99.2, 6, 99.5);
+        const s2 = clamp(s3 - mw, 3, 98.5);
+        const s1 = clamp(s2 - dw, 0, 97.5);
+        sIntro = { s1, s2, s3 };
+      }
+
+      // 先設為起始狀態，再 tween 回「原本比例」
+      el.style.background = build(base.angle, base.colors, sIntro);
+      el.style.willChange = 'background, transform, filter';
+
+      active.set(el, {
+        base,
+        s: sIntro,
+        center: sBase,       // 浮動中心＝原本比例
+        floatAmp,
+        floatHz,
+        raf: null
+      });
+
+      tweenStops(el, sIntro, sBase, introDuration + 160*v, () => startFloat(el));
+
+      // 保留彈跳（套在鍵本體，不動顏色）
+      if (keepBounce && el.animate) {
+        el.animate(
+          [
+            { transform: 'translateZ(0) scale(1)', filter: 'brightness(1)' },
+            { transform: `translateZ(0) scale(${1 + 0.05 + 0.10 * v})`, filter: `brightness(${1 + 0.50 * v})` },
+            { transform: 'translateZ(0) scale(1)', filter: 'brightness(1)' }
+          ],
+          { duration: 140 + 180*v, easing: 'cubic-bezier(.2,.9,.2,1)' }
+        );
+      }
+    },
+
+    // 不還原顏色：只停浮動與清理（背景交給你的 keyOff 還原黑/白）
+    off(el) {
+      const st = active.get(el);
+      if (!st) return;
+      if (st.raf) { cancelAnimationFrame(st.raf); st.raf = null; }
+      el.style.willChange = '';
+      active.delete(el);
+    }
+  };
+})();
 
 
 
