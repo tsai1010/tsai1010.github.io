@@ -1,22 +1,26 @@
+window.AudioContext = window.AudioContext || window.webkitAudioContext;
+
 let ctx;
 let ctxStart = false;
 let midi_synth;
 
 function initAudio() {
   if (!ctxStart) {
-    // ⚡ 確保只在互動後才建立
-    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    // ⚡ 只在第一次點擊 / 觸控後建立
+    ctx = new AudioContext();
     midi_synth = new window.MidiSynth();
     midi_synth.setAudioContext(ctx, ctx.destination);
     ctxStart = true;
     console.log("AudioContext 已啟動:", ctx);
 
-    // 在 initAudio() 裡加上：
+    // 🔊 靜音保持音源
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
-    gain.gain.value = 0; // 完全靜音
+    gain.gain.value = 0;
     osc.connect(gain).connect(ctx.destination);
-    osc.start(); // 不停播，保持 Context 活著
+    osc.start();
+
+    console.log("靜音保持音源啟動，避免被切掉");
   } else if (ctx.state === "suspended") {
     ctx.resume().then(() => {
       console.log("AudioContext 已恢復");
@@ -24,7 +28,7 @@ function initAudio() {
   }
 }
 
-// 🔹 綁定事件（click + touchstart，確保行動裝置能觸發）
+// 綁定互動事件
 document.addEventListener("click", initAudio, { once: true });
 document.addEventListener("touchstart", initAudio, { once: true });
 
@@ -736,3 +740,4 @@ function oscCreate(freq, velocityAmount, decay_time, filter, ff, width=10){
     return osc;
 
 }
+
