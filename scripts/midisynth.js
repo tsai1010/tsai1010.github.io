@@ -393,7 +393,7 @@ function MidiSynthCore(target){
                             vel_adj = 1+((64 - n)*-0.75/64);
                         }
                     else {
-                        velocityAmount = velValue*harmonicRatio[ratioIndex+h-1];
+                        velocityAmount = velValue*this.harmonicRatio[ratioIndex+h-1];
                         osc_freq += osc_freq*inHarmonic;
                         decay_time = this.osc_decay - (n-14+(h-1)*6)/12.0;
                         vel_adj = 1+((58-n-(h-1)*6)*-0.75/64);
@@ -958,6 +958,15 @@ function MidiSynthCore(target){
                 this.conv[9].buffer = filteredBuffer;
             });
             this.postShaperGain[9].gain.setValueAtTime(1.0, this.actx.currentTime);
+
+
+            // 🔇 保活：靜音 ConstantSource，不改動音色路徑
+            try {
+                const _keep = this.actx.createConstantSource();
+                const _g = this.actx.createGain(); _g.gain.value = 0;
+                _keep.connect(_g).connect(this.dest); _keep.start();
+            } catch (e) { /* 老舊瀏覽器沒有 ConstantSource 就略過 */ }
+
         }
     });
 }

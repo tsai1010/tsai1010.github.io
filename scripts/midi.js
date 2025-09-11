@@ -14,16 +14,8 @@ function initAudio() {
     midi_synth = new window.MidiSynth();
     midi_synth.setAudioContext(ctx, ctx.destination);
     ctxStart = true;
-    console.log("AudioContext 已啟動:", ctx);
+    console.log("AudioContext 1.0已啟動:", ctx);
 
-    // 🔊 靜音保持音源
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    gain.gain.value = 0;
-    osc.connect(gain).connect(ctx.destination);
-    osc.start();
-
-    console.log("靜音保持音源啟動，避免被切掉");
   } else if (ctx.state === "suspended") {
     ctx.resume().then(() => {
       console.log("AudioContext 已恢復");
