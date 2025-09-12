@@ -974,15 +974,29 @@ function MidiSynthCore(target){
                 console.warn("[MidiSynth] 測試音失敗", e);
             }
 
-            // 🔇 保活：靜音 ConstantSource，不改動音色路徑
+            // 🔇 保活：極小音量（不可聽），接在壓縮器前端，避免被 iOS 當成靜音優化
             try {
-                this._keepGain = this.actx.createGain();
-                this._keepGain.gain.value = 0;
-                this._keeposc = this.actx.createOscillator();
-                this._keeposc.connect(this._keepGain).connect(this.dest);
-                this._keeposc.start();
-                console.log("[MidiSynth] 靜音 ConstantSource");
-            } catch (e) { /* 老舊瀏覽器沒有 ConstantSource 就略過 */ }
+                // 優先用 ConstantSource（最省資源）
+                this._keepAliveSrc = this.actx.createConstantSource();
+                this._keepAliveGain = this.actx.createGain();
+
+                // ⬅️ 重點：不要 0，改成超小值，約 -120 dB
+                this._keepAliveGain.gain.value = 1e-6;
+
+                // 讓保活訊號經過你的處理鏈（這裡選接在 comp 前）
+                this._keepAliveSrc.connect(this._keepAliveGain).connect(this.comp);
+                this._keepAliveSrc.start();
+                console.log("[MidiSynth] keep-alive (ConstantSource) active");
+            } catch (e) {
+                // 舊 Safari 沒有 ConstantSource：用 1 Hz 正弦波 + 超小音量當後備
+                this._keepAliveOsc = this.actx.createOscillator();
+                this._keepAliveGain = this.actx.createGain();
+                this._keepAliveOsc.frequency.value = 1;      // 很低頻
+                this._keepAliveGain.gain.value = 1e-6;       // 一樣不可聽
+                this._keepAliveOsc.connect(this._keepAliveGain).connect(this.comp);
+                this._keepAliveOsc.start();
+                console.log("[MidiSynth] keep-alive (Oscillator) fallback active");
+            }
 
             
 
