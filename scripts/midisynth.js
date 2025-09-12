@@ -959,20 +959,20 @@ function MidiSynthCore(target){
             });
             this.postShaperGain[9].gain.setValueAtTime(1.0, this.actx.currentTime);
 
-            // 🔊 測試音 (440Hz, 1 秒)
-            try {
-                const testOsc = this.actx.createOscillator();
-                const testGain = this.actx.createGain();
-                testOsc.type = "sine";
-                testOsc.frequency.value = 440;
-                testGain.gain.value = 0.2; // 適中音量
-                testOsc.connect(testGain).connect(this.dest);
-                testOsc.start();
-                testOsc.stop(this.actx.currentTime + 1);
-                console.log("[MidiSynth] 測試音播放中 (440Hz for 1s)");
-            } catch (e) {
-                console.warn("[MidiSynth] 測試音失敗", e);
-            }
+            // // 🔊 測試音 (440Hz, 1 秒)
+            // try {
+            //     const testOsc = this.actx.createOscillator();
+            //     const testGain = this.actx.createGain();
+            //     testOsc.type = "sine";
+            //     testOsc.frequency.value = 440;
+            //     testGain.gain.value = 0.2; // 適中音量
+            //     testOsc.connect(testGain).connect(this.dest);
+            //     testOsc.start();
+            //     testOsc.stop(this.actx.currentTime + 1);
+            //     console.log("[MidiSynth] 測試音播放中 (440Hz for 1s)");
+            // } catch (e) {
+            //     console.warn("[MidiSynth] 測試音失敗", e);
+            // }
 
             // 🔇 保活：極小音量（不可聽），接在壓縮器前端，避免被 iOS 當成靜音優化
             try {
@@ -1015,5 +1015,6 @@ class MidiSynth {
 }
 
 export default MidiSynth;
+
 
 window.MidiSynth = MidiSynth;
