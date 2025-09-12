@@ -976,9 +976,12 @@ function MidiSynthCore(target){
 
             // 🔇 保活：靜音 ConstantSource，不改動音色路徑
             try {
-                const _keep = this.actx.createConstantSource();
-                const _g = this.actx.createGain(); _g.gain.value = 0;
-                _keep.connect(_g).connect(this.dest); _keep.start();
+                this._keepGain = this.actx.createGain();
+                this._keepGain.gain.value = 0;
+                this._keeposc = this.actx.createOscillator();
+                this._keeposc.connect(this._keepGain).connect(this.dest);
+                this._keeposc.start();
+                console.log("[MidiSynth] 靜音 ConstantSource");
             } catch (e) { /* 老舊瀏覽器沒有 ConstantSource 就略過 */ }
 
             
