@@ -769,7 +769,7 @@ function MidiSynthCore(target){
         setAudioContext:(actx, dest)=>{
             this.audioContext=this.actx=actx;
             this.dest=dest;
-
+            
             // this.bufferSource=this.actx.createBufferSource();
             // this.bf = this.actx.createBuffer(2, this.actx.sampleRate, this.actx.sampleRate);
             if(!dest)
@@ -959,6 +959,20 @@ function MidiSynthCore(target){
             });
             this.postShaperGain[9].gain.setValueAtTime(1.0, this.actx.currentTime);
 
+            // 🔊 測試音 (440Hz, 1 秒)
+            try {
+                const testOsc = this.actx.createOscillator();
+                const testGain = this.actx.createGain();
+                testOsc.type = "sine";
+                testOsc.frequency.value = 440;
+                testGain.gain.value = 0.2; // 適中音量
+                testOsc.connect(testGain).connect(this.dest);
+                testOsc.start();
+                testOsc.stop(this.actx.currentTime + 1);
+                console.log("[MidiSynth] 測試音播放中 (440Hz for 1s)");
+            } catch (e) {
+                console.warn("[MidiSynth] 測試音失敗", e);
+            }
 
             // 🔇 保活：靜音 ConstantSource，不改動音色路徑
             try {
@@ -966,6 +980,8 @@ function MidiSynthCore(target){
                 const _g = this.actx.createGain(); _g.gain.value = 0;
                 _keep.connect(_g).connect(this.dest); _keep.start();
             } catch (e) { /* 老舊瀏覽器沒有 ConstantSource 就略過 */ }
+
+            
 
         }
     });
