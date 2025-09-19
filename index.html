@@ -33,11 +33,14 @@
       <div class="menuBar" id="m1" onmouseover="menuBarOver(this);" onmouseout="menuBarOut(this);">
         
       </div>
-      <div id="midi-ui"></div>
+      <!-- <audio controls src="https://www.w3schools.com/html/horse.mp3"></audio> -->
+
       
 
     </div>
 
+
+    <div id="panel-ui"></div>
     <div id="player-slot"></div>
 
     <div id="piano">
@@ -45,11 +48,11 @@
       <div id="KeyboardW"></div>
     </div>
     <div id="floor"></div>
-    <script type="module">
+    <!-- <script type="module">
       import MidiSynth from 'https://tsai1010.github.io/scripts/midisynth.js';
-    </script>
+    </script> -->
 
-
+    <script src="scripts/midisynth.js" type="module"></script>
 
     <script src="scripts/data.js"></script>
     <script src="scripts/main.js"></script>
@@ -57,6 +60,12 @@
 
     <script src="scripts/midiplayerUI.js"></script>
     <script src="scripts/player-ui.js"></script>
+    <script src="scripts/midi-cc-panel.js"></script>
+
+    <script>
+      const panelUI = createMidiCcPanel('#panel-ui');
+      panelUI.setOffset(150, 16);
+    </script>
 
    <script>
       // --- 隱藏掛載 midiplayerUI，拿到它的 player ---
@@ -105,6 +114,9 @@
         marqueeSlowZonePx: 120
       });
 
+
+      
+
     </script>
 
     <style>
@@ -120,6 +132,165 @@
       #player-slot .pui-time,
       #player-slot .pui-seek{ width: 100%; margin-inline: auto; }
     </style>
+    
+
+    <!-- <script>
+      window.AudioContext = window.AudioContext || window.webkitAudioContext;
+
+      // 只定義：真正建立會在你「呼叫」它的點擊/觸控事件裡
+      window.initAudio = window.initAudio || (async function initAudioOnce() {
+        if (!window.ctx) {
+          window.ctx = new AudioContext();                   // ← 真正建立在手勢回呼裡
+          console.log('[init] new AudioContext created');
+        }
+        if (window.ctx.state === 'suspended') {
+          await window.ctx.resume();
+          console.log('[init] ctx resumed');
+        }
+
+        // 保活（非零，避免 iOS 立刻切掉）
+        if (!window._keepAlive) {
+          try {
+            const g = window.ctx.createGain(); g.gain.value = 1e-6;   // -120 dB
+            const s = window.ctx.createConstantSource(); s.offset.value = 1;
+            s.connect(g).connect(window.ctx.destination);
+            s.start();
+            window._keepAlive = s;
+            console.log('[init] keep-alive started');
+          } catch {
+            const o = window.ctx.createOscillator(); o.frequency.value = 1;
+            const g = window.ctx.createGain(); g.gain.value = 1e-6;
+            o.connect(g).connect(window.ctx.destination); o.start();
+            window._keepAlive = o;
+            console.log('[init] keep-alive (osc fallback) started');
+          }
+        }
+
+        // 只初始化一次 MidiSynth，並用同一個 ctx
+        if (window.MidiSynth && !window.midi_synth) {
+          window.midi_synth = new window.MidiSynth();
+          window.midi_synth.setAudioContext(window.ctx, window.ctx.destination);
+          console.log('[init] MidiSynth initialized');
+        }
+      });
+    </script> -->
+
+    <!-- 加到 <body> 底部或你的 JS 檔末端 -->
+    <!-- <script>
+      /* ======= 漂浮除錯面板（平板可見） ======= */
+      (function () {
+        const panel = document.createElement('div');
+        panel.style.cssText = `
+          position:fixed; z-index:99999; right:8px; bottom:8px;
+          width: min(90vw, 420px); max-height: 45vh; background: rgba(0,0,0,.8);
+          color:#0f0; font:12px/1.4 Consolas,Monaco,monospace; border-radius:10px;
+          box-shadow:0 6px 20px rgba(0,0,0,.4); overflow:hidden;
+        `;
+        panel.innerHTML = `
+          <div style="display:flex;align-items:center;gap:6px;padding:6px;background:#111;border-bottom:1px solid #222">
+            <strong style="color:#9cf">DEBUG</strong>
+            <span id="ctxState" style="margin-left:auto;color:#ff0">ctx: n/a</span>
+            <button id="dbgClear" style="background:#333;color:#9cf;border:1px solid #555;border-radius:6px;padding:4px 8px">清空</button>
+          </div>
+          <div style="padding:6px;display:flex;gap:6px;background:#111;border-bottom:1px solid #222">
+            <button id="dbgInit"  style="background:#245;border:1px solid #57a;color:#fff;border-radius:6px;padding:4px 8px">🔊 啟動音訊</button>
+            <button id="dbgBeep"  style="background:#254;border:1px solid #5a7;color:#fff;border-radius:6px;padding:4px 8px">📣 測試嗶聲</button>
+          </div>
+          <pre id="dbgLog" style="margin:0;padding:8px;overflow:auto;white-space:pre-wrap;"></pre>
+        `;
+        document.body.appendChild(panel);
+
+        const pre = panel.querySelector('#dbgLog');
+        const stateEl = panel.querySelector('#ctxState');
+        const logLine = (...args) => {
+          const s = args.map(a => {
+            try { return typeof a === 'object' ? JSON.stringify(a) : String(a); }
+            catch { return String(a); }
+          }).join(' ');
+          pre.textContent += s + '\n';
+          pre.scrollTop = pre.scrollHeight;
+        };
+
+        // 攔截 console.* 到面板
+        const _log = console.log.bind(console);
+        const _warn = console.warn.bind(console);
+        const _err = console.error.bind(console);
+        console.log = (...a) => { _log(...a); logLine('[log]', ...a); };
+        console.warn = (...a) => { _warn(...a); logLine('[warn]', ...a); };
+        console.error = (...a) => { _err(...a); logLine('[err]', ...a); };
+
+        // 每秒顯示 AudioContext 狀態（一律讀 window.ctx）
+        setInterval(() => {
+          try {
+            const c = window.ctx;
+            if (c) {
+              stateEl.textContent = `ctx: ${c.state} @ ${c.currentTime.toFixed(2)}s`;
+            } else {
+              stateEl.textContent = 'ctx: <none>';
+            }
+          } catch { stateEl.textContent = 'ctx: <none>'; }
+        }, 1000);
+
+        // 啟動音訊（手勢內執行）
+        panel.querySelector('#dbgInit').addEventListener('click', async () => {
+          try {
+            window.AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!window.ctx) {
+              window.ctx = new AudioContext();
+              console.log('[dbg] new AudioContext created');
+            }
+            if (window.ctx.state === 'suspended') {
+              await window.ctx.resume();
+              console.log('[dbg] ctx resumed');
+            }
+            // 🔒 保活
+            if (!window._keepAlive) {
+              const g = window.ctx.createGain();
+              g.gain.value = 1e-6;
+              const s = window.ctx.createConstantSource();
+              s.offset.value = 1;
+              s.connect(g).connect(window.ctx.destination);
+              s.start();
+              window._keepAlive = s;
+              console.log('[dbg] keep-alive source started');
+            }
+            // 🔔 即時更新 UI
+            stateEl.textContent = `ctx: ${window.ctx.state} @ ${window.ctx.currentTime.toFixed(2)}s`;
+            // 若有 MidiSynth
+            if (window.MidiSynth && !window.midi_synth) {
+              window.midi_synth = new window.MidiSynth();
+              window.midi_synth.setAudioContext(window.ctx, window.ctx.destination);
+              console.log('[dbg] MidiSynth initialized');
+            }
+          } catch (e) {
+            console.error('[dbg] init error', e);
+          }
+        });
+
+        // 測試嗶聲
+        panel.querySelector('#dbgBeep').addEventListener('click', () => {
+          try {
+            if (!window.ctx) { console.warn('[dbg] no ctx'); return; }
+            const c = window.ctx;
+            const o = c.createOscillator();
+            const g = c.createGain();
+            o.type = 'sine';
+            o.frequency.value = 440;
+            g.gain.value = 0.08;
+            o.connect(g).connect(c.destination);
+            const t = c.currentTime;
+            o.start(t);
+            g.gain.exponentialRampToValueAtTime(0.000001, t + 0.5);
+            o.stop(t + 0.6);
+            console.log('[dbg] beep 440Hz 0.6s');
+          } catch (e) { console.error(e); }
+        });
+
+        panel.querySelector('#dbgClear').addEventListener('click', () => pre.textContent = '');
+      })();
+    </script> -->
+
+
 
   </body>
 </html>
