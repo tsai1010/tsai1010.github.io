@@ -632,6 +632,7 @@ function MidiSynthCore(target){
             }
         },
         noteOn:(ch, note, vel, t)=>{
+            // console.log("[noteOn] ctx=", this.audioContext?.state);
             if(this.debug)
                 console.log("noteOn:", ch, note, vel, t);
             if(vel==0){
@@ -959,7 +960,7 @@ function MidiSynthCore(target){
             });
             this.postShaperGain[9].gain.setValueAtTime(1.0, this.actx.currentTime);
 
-            // // 🔊 測試音 (440Hz, 1 秒)
+            // 🔊 測試音 (440Hz, 1 秒)
             // try {
             //     const testOsc = this.actx.createOscillator();
             //     const testGain = this.actx.createGain();
@@ -974,31 +975,70 @@ function MidiSynthCore(target){
             //     console.warn("[MidiSynth] 測試音失敗", e);
             // }
 
-            // 🔇 保活：極小音量（不可聽），接在壓縮器前端，避免被 iOS 當成靜音優化
+            // ===== keep-alive & diagnostics (put this at the very end of setAudioContext) =====
+            // try {
+            //     // 避免重複建立
+            //     if (!this._keepAliveGain && !this._keepAliveSrc && !this._keepAliveOsc) {
+            //         // 1) 選好要接的「處理鏈入口」
+            //         let keepTarget = null;
+            //         if (this.comp && this.comp.numberOfInputs > 0) {
+            //             // 多數情況：接到壓縮器的「輸入」讓整條管線保持活躍
+            //             keepTarget = this.comp;
+            //         } else if (this.out) {
+            //             // 次選：你的混音總線
+            //             keepTarget = this.out;
+            //         } else {
+            //             // 最後手段：直接接輸出（不推薦，但仍比沒有強）
+            //             keepTarget = this.dest || this.actx.destination;
+            //         }
+
+            //         // 2) 優先 ConstantSource（省資源），退而求其次用 1 Hz 正弦波
+            //         this._keepAliveGain = this.actx.createGain();
+            //         this._keepAliveGain.gain.value = 1e-6; // 不能是 0，約 -120 dB
+
+            //         try {
+            //             this._keepAliveSrc = this.actx.createConstantSource();
+            //             this._keepAliveSrc.offset.value = 1.0; // 任意常數
+            //             this._keepAliveSrc.connect(this._keepAliveGain).connect(keepTarget);
+            //             this._keepAliveSrc.start();
+            //             console.log("[MidiSynth] keep-alive (ConstantSource) started");
+            //         } catch (e) {
+            //             this._keepAliveOsc = this.actx.createOscillator();
+            //             this._keepAliveOsc.frequency.value = 1; // 很低頻
+            //             this._keepAliveOsc.connect(this._keepAliveGain).connect(keepTarget);
+            //             this._keepAliveOsc.start();
+            //             console.log("[MidiSynth] keep-alive (Oscillator fallback) started");
+            //         }
+
+            //         // 3) 防止某處把它設回 0（每次 setAudioContext 都再設一次）
+            //         if (this._keepAliveGain.gain.value === 0) {
+            //             this._keepAliveGain.gain.value = 1e-6;
+            //         }
+
+            //         // 4) 診斷：每 2s 看一次狀態
+            //         if (!this._stateLogTimer) {
+            //         this._stateLogTimer = setInterval(() => {
+            //             try { console.log("[ctx]", this.actx.state, "@", this.actx.currentTime.toFixed(2)); } catch {}
+            //         }, 2000);
+            //         }
+            //     }
+            // } catch (err) {
+            //     console.warn("[MidiSynth] keep-alive setup failed:", err);
+            // }
+
             try {
-                // 優先用 ConstantSource（最省資源）
-                this._keepAliveSrc = this.actx.createConstantSource();
-                this._keepAliveGain = this.actx.createGain();
-
-                // ⬅️ 重點：不要 0，改成超小值，約 -120 dB
-                this._keepAliveGain.gain.value = 1e-6;
-
-                // 讓保活訊號經過你的處理鏈（這裡選接在 comp 前）
-                this._keepAliveSrc.connect(this._keepAliveGain).connect(this.comp);
-                this._keepAliveSrc.start();
-                console.log("[MidiSynth] keep-alive (ConstantSource) active");
-            } catch (e) {
-                // 舊 Safari 沒有 ConstantSource：用 1 Hz 正弦波 + 超小音量當後備
-                this._keepAliveOsc = this.actx.createOscillator();
-                this._keepAliveGain = this.actx.createGain();
-                this._keepAliveOsc.frequency.value = 1;      // 很低頻
-                this._keepAliveGain.gain.value = 1e-6;       // 一樣不可聽
-                this._keepAliveOsc.connect(this._keepAliveGain).connect(this.comp);
-                this._keepAliveOsc.start();
-                console.log("[MidiSynth] keep-alive (Oscillator) fallback active");
-            }
-
-            
+                const tg = this.actx.createGain();
+                tg.gain.value = 0.05; // 小聲
+                const tosc = this.actx.createOscillator();
+                tosc.type = "sine";
+                tosc.frequency.value = 440;
+                // 走你的通道 0：chvol[0] → ... → out → comp → dest
+                tosc.connect(tg).connect(this.chvol[0]);
+                const now = this.actx.currentTime;
+                tosc.start(now);
+                tosc.stop(now + 0.8);
+                console.log("[MidiSynth] test ping");
+            } catch(e) {}
 
         }
     });
@@ -1015,6 +1055,5 @@ class MidiSynth {
 }
 
 export default MidiSynth;
-
 
 window.MidiSynth = MidiSynth;

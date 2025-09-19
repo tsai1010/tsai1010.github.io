@@ -7,6 +7,14 @@ let midi_synth;
 const midiInputs = {};
 const oscSet = {};
 
+// function initAudio() {
+//   if (typeof window.initAudio === 'function') {
+//     window.initAudio();   // 仍需在手勢事件裡呼叫它
+//   } else {
+//     console.warn('[midi.js] window.initAudio 未載入');
+//   }
+// }
+
 function initAudio() {
   if (!ctxStart) {
     // ⚡ 只在第一次點擊 / 觸控後建立
@@ -24,8 +32,8 @@ function initAudio() {
 }
 
 // 綁定互動事件
-document.addEventListener("click", initAudio, { once: true });
-document.addEventListener("touchstart", initAudio, { once: true });
+document.addEventListener("click", initAudio, { once: false });
+document.addEventListener("touchstart", initAudio, { once: false });
 
 function setMasterV(value){
     midi_synth.setMasterVol(value);
@@ -194,7 +202,7 @@ function handleInput(input){
             }
             else {
                 if (channelFilter[channel]==1) {
-                    keyOn(document.getElementsByClassName(midiToId[note])[0], note, velocity, channel);
+                    keyOn(document.getElementsByClassName(midiToId[note])[0], note, velocity, channel, 'ext');
                 }
                 
             }
