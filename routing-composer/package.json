@@ -1,0 +1,16 @@
+{
+  "name": "routing-composer",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "esbuild src/index.jsx --bundle --format=esm --outfile=../routing-composer/routing-composer.esm.js --jsx=automatic --target=es2020 --minify --external:react --external:react-dom",
+    "watch": "npm run build -- --watch"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "esbuild": "^0.25.12"
+  }
+}
