@@ -8,7 +8,7 @@ You can also use a version with built-in GUI for controlling parameters such as 
 Load it directly from the CDN:  
 ```html
 <script type="module">
-  import MidiSynthGUI from 'https://tsai1010.github.io/scripts/midisynth-gui.js';
+  import MidiSynth from 'https://tsai1010.github.io/scripts/midisynth-gui.js';
 </script>
 ```
 
