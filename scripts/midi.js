@@ -15,7 +15,7 @@ const oscSet = {};
 //   }
 // }
 
-function initAudio() {
+async function initAudio() {
   if (!ctxStart) {
     // ⚡ 只在第一次點擊 / 觸控後建立
     ctx = new AudioContext();
@@ -24,11 +24,23 @@ function initAudio() {
     ctxStart = true;
     console.log("AudioContext 1.0已啟動:", ctx);
 
+    // ✅ 只有 GUI 版本才有這個函式
+    if (typeof midi_synth.enableRoutingComposer === "function") {
+      await midi_synth.enableRoutingComposer({
+        button: '#composer-slot',
+        tailwind: 'auto',
+      });
+    } else {
+      console.log("這是非 GUI 版本的 MidiSynth，略過 Routing Composer 初始化。");
+    }
+
   } else if (ctx.state === "suspended") {
     ctx.resume().then(() => {
       console.log("AudioContext 已恢復");
     });
   }
+
+  window.synth = midi_synth;
 }
 
 // 綁定互動事件
