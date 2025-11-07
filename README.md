@@ -12,7 +12,7 @@ Load it directly from the CDN:
 </script>
 ```
 
-### Example: Attach GUI to a <div>
+### Example: Attach GUI to an HTML element
 The following example shows how to initialize the synth only after the first user interaction (required by browsers),  
 and how to attach the GUI panel to an existing element using `enableRoutingComposer()` (available only in the GUI version).
 
