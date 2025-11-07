@@ -15,12 +15,36 @@ import ChainEditor from "./ChainEditor.jsx";
 export default function AudioPatchbay({ synth, buttonTarget, autoTailwind = false }) {
   const [open, setOpen] = useState(false);
 
-    const [a4, setA4] = useState(() => synth?.a4_freq ?? 440);
-    useEffect(() => { if (typeof synth?.a4_freq === 'number') setA4(synth.a4_freq); }, [synth]);   
+  useEffect(() => {
+    if (!open) return;
+    const resumeAll = async () => {
+      try {
+        await __RC_HANDLE__?.engine?.resume?.();
+        if (window.synth?.actx?.state === "suspended") await window.synth.actx.resume();
+      } catch (e) {
+        console.warn("[RC] resumeAll failed", e);
+      }
+    };
+    resumeAll();
+  }, [open]);
+
+  const [a4, setA4] = useState(() => synth?.a4_freq ?? 440);
+  useEffect(() => {
+    if (typeof synth?.a4_freq === 'number') setA4(Number(synth.a4_freq));
+  }, [synth]);  
+
+  useEffect(() => {
+    let last = a4;
+    const id = setInterval(() => {
+      const cur = Number(synth?.a4_freq ?? 440);
+      if (!Number.isNaN(cur) && cur !== last) { last = cur; setA4(cur); }
+    }, 250);
+    return () => clearInterval(id);
+  }, [synth, a4]);
     
-    // 計算百分比
-    const a = 420, b = 460;
-    const pos = Math.max(0, Math.min(1, (a4 - a) / (b - a))) * 100;
+  // 計算百分比
+  const a = 420, b = 460;
+  const pos = Math.max(0, Math.min(1, (a4 - a) / (b - a))) * 100;
 
   // Optional: auto inject Tailwind CDN
   useEffect(() => {
@@ -39,8 +63,14 @@ export default function AudioPatchbay({ synth, buttonTarget, autoTailwind = fals
   const ButtonPortal = () => (
     <button
       className="rc-toggle-btn"
+      onClick={async () => {
+        requestAnimationFrame(() => setOpen(true));  // ⭐ 讓瀏覽器先結束前一輪 render
+        try {
+          await __RC_HANDLE__?.engine?.resume?.();
+          if (window.synth?.actx?.state === "suspended") await window.synth.actx.resume();
+        } catch (e) {}
+      }}
       title="Open Routing Composer"
-      onClick={() => setOpen(true)}
     >
       Routing Composer
     </button>
@@ -50,9 +80,9 @@ export default function AudioPatchbay({ synth, buttonTarget, autoTailwind = fals
     <div>
       <style>{`
         :root { --rc-bg1:#0f1022; --rc-bg2:#2a2b55; --rc-card:rgba(22,22,34,.92); --rc-border:rgba(255,255,255,.1); --rc-text:#f5f7ff; }
-        .rc-toggle-btn { padding:10px 14px; border-radius:999px; border:1px solid var(--rc-border); background:rgba(255,255,255,.08); color:var(--rc-text); backdrop-filter:blur(8px); box-shadow:0 6px 24px rgba(0,0,0,.35); cursor:pointer; z-index:9999; }
+        .rc-toggle-btn { padding:10px 14px; border-radius:999px; border:1px solid var(--rc-border); background:rgba(255,255,255,.08); color:var(--rc-text); /*backdrop-filter:blur(8px);*/ box-shadow:0 6px 24px rgba(0,0,0,.35); cursor:pointer; z-index:9999; }
         .rc-toggle-btn:hover { background:rgba(255,255,255,.12); }
-        .rc-overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); backdrop-filter:blur(2px); display:flex; align-items:center; justify-content:center; z-index:9998; }
+        .rc-overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); /*backdrop-filter:blur(2px);*/ display:flex; align-items:center; justify-content:center; z-index:9998; }
         .rc-panel { width:min(1120px,96vw); height:min(88vh,900px); background:var(--rc-card); border:1px solid var(--rc-border); border-radius:18px; box-shadow:0 20px 60px rgba(0,0,0,.5); color:var(--rc-text); display:flex; flex-direction:column; overflow:hidden; }
         .rc-header { display:flex; align-items:center; justify-content:space-between; padding:14px 16px; border-bottom:1px solid var(--rc-border); font-weight:700; letter-spacing:.2px; }
         .rc-close { padding:8px 12px; border-radius:10px; border:1px solid var(--rc-border); background:rgba(255,255,255,.06); color:var(--rc-text); cursor:pointer; }
@@ -126,6 +156,14 @@ export default function AudioPatchbay({ synth, buttonTarget, autoTailwind = fals
             box-shadow: 0 0 4px rgba(255,255,255,0.5);
             cursor: pointer;
         }
+        .rc-overlay::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(135deg,#0b0d1f99,#272b5277);
+          opacity: .9;
+          pointer-events: none;
+        }
         input[type=range] { accent-color: #3b82f6; }
       `}</style>
 
@@ -154,21 +192,24 @@ export default function AudioPatchbay({ synth, buttonTarget, autoTailwind = fals
 
                     {/* 全域 A4 調整 */}
                     <div className="flex items-center gap-2 text-sm opacity-90">
-                    <span>A4</span>
-                    <input
+                      <span>A4</span>
+                      <input
                         type="range"
                         min="420"
                         max="460"
                         step="0.1"
-                        defaultValue={synth?.a4_freq ?? 440}
+                        value={a4}
                         className="rc-slider"
-                        style={{ "--rc-pos": `${pos}%`, width: 160 }}
+                        style={{ "--rc-pos": `${((a4 - 420) / 40) * 100}%`, width: 160 }}
                         onChange={(e) => {
-                        const v = Number(e.target.value);
-                        if (synth && typeof v === "number") synth.a4_freq = v;
+                          const v = Number(e.target.value);
+                          if (!Number.isNaN(v)) {
+                            setA4(v);                  // 觸發 React 重渲染
+                            if (synth) synth.a4_freq = v; // 回寫到你的引擎
+                          }
                         }}
-                    />
-                    <span>{synth?.a4_freq?.toFixed?.(1) ?? 440}Hz</span>
+                      />
+                      <span>{a4.toFixed(1)}Hz</span>
                     </div>
                 </div>
 
@@ -176,7 +217,6 @@ export default function AudioPatchbay({ synth, buttonTarget, autoTailwind = fals
                     {/* Resume Audio 按鈕 */}
                     <button
                     className="rc-close"
-                    style={{ background: "rgba(255,255,255,0.1)" }}
                     onClick={() => synth?.actx?.resume?.()}
                     >
                     Resume Audio

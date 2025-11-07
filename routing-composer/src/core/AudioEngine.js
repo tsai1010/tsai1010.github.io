@@ -43,6 +43,14 @@ export class AudioEngine {
     }
     }, 1000);
 
+    // 🔄 自動監看狀態，防止被暫停
+    setInterval(() => {
+        try {
+            if (this.actx?.state === "suspended") this.actx.resume();
+            if (this.midiSynth?.actx?.state === "suspended") this.midiSynth.actx.resume();
+        } catch {}
+    }, 2000);
+
   }
 
   updateGainNodeById(id, value) {
