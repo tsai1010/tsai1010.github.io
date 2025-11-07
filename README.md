@@ -58,11 +58,15 @@ You can place a target `<div>` or button in your HTML:
 When the user first interacts (click/touch), the GUI panel will appear inside the target element.
 
 ### Notes
+* The GUI version internally uses **React** and **Tailwind CSS** for rendering.
+  - If your project already includes React and Tailwind, the GUI will automatically use your existing versions.
+  - If not, it will dynamically load lightweight standalone builds at runtime.
 * The GUI version includes the same sound engine as `midisynth.js`.
 * You can access the engine directly via `synthGUI.engine`.
 * All functions such as `send()`, `reset()`, and `setMasterVol()` remain available.
 * The GUI layout is responsive and works on both desktop and tablet browsers.
 * 👉 Try the live demo: [tsai1010.github.io/index-gui.html](https://tsai1010.github.io/index-gui.html)
+
 
 ---
 
