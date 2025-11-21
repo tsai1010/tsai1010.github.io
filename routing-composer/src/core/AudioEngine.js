@@ -342,17 +342,22 @@ export class AudioEngine {
     // === 1️⃣ Note On：先試 KS + GUI 內的 source（gateOsc）===
     let triggered = false;
 
+    // if (on) {
+    //   // (a) KS pluck
+    //   const ksOk  = this.pluckKS(ch, nn, velocity) === true;
+
+    //   // 若沒找到 KS (返回 false)，就 fallback 用 gateOsc()
+    //   let oscOk = false;
+    //   if (!ksOk) {
+    //     oscOk = this.gateOsc(ch, note, velocity) === true;
+    //   }
+
+    //   triggered = ksOk || oscOk;
+    // }
     if (on) {
-      // (a) KS pluck
-      const ksOk  = this.pluckKS(ch, nn, velocity) === true;
-
-      // 若沒找到 KS (返回 false)，就 fallback 用 gateOsc()
-      let oscOk = false;
-      if (!ksOk) {
-        oscOk = this.gateOsc(ch, note, velocity) === true;
-      }
-
-      triggered = ksOk || oscOk;
+      const ksOk  = this.pluckKS(ch, note == null ? 69 : note, velocity) === true;
+      const oscOk = this.gateOsc(ch, note, velocity) === true;
+      triggered   = ksOk || oscOk;
     }
 
     // === 2️⃣ 如果 KS + gateOsc 都沒命中，再用舊的 fallback 動態 OSC ===
@@ -471,34 +476,89 @@ export class AudioEngine {
       }
     }
 
-    // === 3️⃣ Note Off：只管 fallback poly osc 的收尾 ===
+    // === 3️⃣ Note Off：KS + OSC ===
     if (!on) {
-      const now2 = this.actx.currentTime;
-      const voicesByCh = this.liveNodes.get("__oscVoices__");
-      if (!voicesByCh || !voicesByCh[ch]) return;
+        const now2 = this.actx.currentTime;
 
-      const entries = Object.entries(voicesByCh[ch]).filter(
-        ([id, v]) => v.note === nn
-      );
-      for (const [id, v] of entries) {
-        const { osc, env, r = 0.2 } = v;
-        try {
-          env.gain.cancelScheduledValues(now2);
-          env.gain.setValueAtTime(env.gain.value ?? 0, now2);
-          env.gain.linearRampToValueAtTime(0, now2 + r);
-          osc.stop(now2 + r + 0.05);
-          setTimeout(() => {
-            try {
-              osc.disconnect();
-              env.disconnect();
-            } catch {}
-            delete voicesByCh[ch][id];
-          }, (r + 0.1) * 1000);
-        } catch (e) {
-          delete voicesByCh[ch][id];
+        // --------------------------------------------------
+        //  KS 先處理（含延音 pedal）
+        // --------------------------------------------------
+
+        const ksVoicesByCh = this.liveNodes.get("__ksVoices__");
+        const sustainOn = (this.midiSynth?.pedal?.[ch] ?? 0) >= 64;
+
+        if (ksVoicesByCh && ksVoicesByCh[ch]) {
+            const entriesKS = Object.entries(ksVoicesByCh[ch]).filter(
+                ([id, v]) => v.note === nn
+            );
+
+            for (const [id, v] of entriesKS) {
+                const { bfs, env } = v;
+
+                // ⭐ 踏板按著：不 release，只做標記
+                if (sustainOn) {
+                    v.sustained = true;
+                    continue;
+                }
+
+                // ⭐ 沒踩踏板 → 正常 KS release
+                try {
+                    const relCtrl = Number(v.params?.ksRelease ?? 0.5);
+                    const minR = 0.02;
+                    const maxR = 1.5;
+                    const rKs = minR + (maxR - minR) * Math.pow(relCtrl, 2.0);
+
+                    env.gain.cancelScheduledValues(now2);
+                    env.gain.setValueAtTime(env.gain.value ?? 1, now2);
+                    env.gain.linearRampToValueAtTime(0, now2 + rKs);
+
+                    bfs.stop(now2 + rKs + 0.05);
+
+                    setTimeout(() => {
+                        try {
+                            bfs.disconnect();
+                            env.disconnect();
+                        } catch {}
+                        delete ksVoicesByCh[ch][id];
+                    }, (rKs + 0.05) * 1000);
+
+                } catch (e) {
+                    delete ksVoicesByCh[ch][id];
+                }
+            }
         }
-      }
+
+        // --------------------------------------------------
+        //  OSC：你的原本 fallback poly osc 的收尾
+        // --------------------------------------------------
+
+        const voicesByCh = this.liveNodes.get("__oscVoices__");
+        if (!voicesByCh || !voicesByCh[ch]) return;
+
+        const entries = Object.entries(voicesByCh[ch]).filter(
+            ([id, v]) => v.note === nn
+        );
+
+        for (const [id, v] of entries) {
+            const { osc, env, r = 0.2 } = v;
+            try {
+                env.gain.cancelScheduledValues(now2);
+                env.gain.setValueAtTime(env.gain.value ?? 0, now2);
+                env.gain.linearRampToValueAtTime(0, now2 + r);
+                osc.stop(now2 + r + 0.05);
+
+                setTimeout(() => {
+                    try { osc.disconnect(); env.disconnect(); } catch {}
+                    delete voicesByCh[ch][id];
+                }, (r + 0.1) * 1000);
+
+            } catch (e) {
+                delete voicesByCh[ch][id];
+            }
+        }
     }
+
+
   }
 
 
@@ -514,17 +574,34 @@ export class AudioEngine {
         
 
         // 先找出符合的 ks_source（ch / program）
-        let chosen = null;
+        let chosen = null;            // 第一個匹配，用來決定 params
         let chosenParams = {};
+        const targets = [];           // 所有符合的 outNode
         const curPg = Number(this.midiSynth && this.midiSynth.pg ? this.midiSynth.pg[ch] : 0);
 
         for (const [k, out] of allKs) {
             const p = this.liveNodes.get(k.replace(":ksOut", ":ksParams")) || {};
-            const mch = p.ch != null ? p.ch : "all";
-            const prog = Number(p.program != null ? p.program : 0);
-            const chMatch = mch === "all" || Number(mch) === ch;
-            const pgMatch = prog === curPg;
-            if (chMatch && pgMatch) { chosen = [k, out]; chosenParams = p; break; }
+            // ch: "all" 或 0~15
+            const mch = p.ch != null ? String(p.ch) : "all";
+            const chMatch = (mch === "all") || (Number(mch) === ch);
+
+            // program: "all" 或 0~127（GUI 預設就是 "all"）
+            let progParam = p.program;
+            if (progParam === undefined || progParam === null || progParam === "all") {
+                progParam = "all";
+            }
+            const prog = progParam === "all" ? null : Number(progParam);
+            const pgMatch = (prog === null) || (prog === curPg);
+
+            if (chMatch && pgMatch) {
+                // 記住第一個匹配的，當作主要 params 來源
+                if (!chosen) {
+                    chosen = [k, out];
+                    chosenParams = p;
+                }
+                // 所有符合的 outNode 都當作目標（支援多條 KS 線路）
+                targets.push(out);
+            }
         }
 
         // 沒有任何匹配 → 回傳 false，讓 gate() fallback 到 osc
@@ -541,20 +618,26 @@ export class AudioEngine {
         const a4 = (this.midiSynth && typeof this.midiSynth.a4_freq === "number") ? this.midiSynth.a4_freq : 440;
         const f = a4 * Math.pow(2, (note - 69) / 12);
 
-        // 準備 seed（優先使用 synth.generateSeedPinkNoise）
+        // === 準備 seed 噪音 ===
         const sr = this.actx.sampleRate;
-        let seed = undefined;
+        let seed = null;
+
         try {
-            if (params.seedNoiseType === 'synthPink' && this.midiSynth && typeof this.midiSynth.generateSeedPinkNoise === 'function') {
-                const period = Math.max(1, Math.round(sr / Math.max(1e-6, f)));
-                seed = this.midiSynth.generateSeedPinkNoise(65535, period);
-            } else {
-                // fallback pink
-                const len = Math.max(2048, Math.round(sr / Math.max(1e-6, f)));
-                const makePinkSeed = (L=4096) => {
-                    const out = new Float32Array(L);
-                    let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
-                    for (let i=0;i<L;i++){
+            const type = String(params.seedNoiseType ?? "pink");
+
+            // 共同使用的長度：跟頻率有關，比較合理
+            const len = Math.max(2048, Math.round(sr / Math.max(1e-6, f)));
+
+            const makeWhite = (L) => {
+                const out = new Float32Array(L);
+                for (let i = 0; i < L; i++) out[i] = Math.random() * 2 - 1;
+                return out;
+            };
+
+            const makePink = (L) => {
+                const out = new Float32Array(L);
+                let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
+                for (let i=0;i<L;i++){
                     const w = Math.random()*2-1;
                     b0 = 0.99886*b0 + w*0.0555179;
                     b1 = 0.99332*b1 + w*0.0750759;
@@ -564,32 +647,118 @@ export class AudioEngine {
                     b5 = -0.7616*b5 - w*0.016898;
                     out[i] = (b0+b1+b2+b3+b4+b5+b6*0.5362)*0.11;
                     b6 = w*0.115926;
-                    }
-                    return out;
-                };
-                seed = makePinkSeed(len);
+                }
+                return out;
+            };
+
+            const makeBrown = (L) => {
+                const out = new Float32Array(L);
+                let acc = 0;
+                for (let i = 0; i < L; i++) {
+                    acc += Math.random()*2 - 1;
+                    if (acc > 8) acc = 8;
+                    if (acc < -8) acc = -8;
+                    out[i] = acc / 8;
+                }
+                return out;
+            };
+
+            const makeGrey = (L) => {
+                const w = makeWhite(L);
+                const p = makePink(L);
+                const out = new Float32Array(L);
+                for (let i = 0; i < L; i++) {
+                    out[i] = 0.6 * w[i] + 0.4 * p[i];
+                }
+                return out;
+            };
+
+            if (type === "white") {
+                seed = makeWhite(len);
+            } else if (type === "brown") {
+                seed = makeBrown(len);
+            } else if (type === "grey" || type === "gray") {
+                seed = makeGrey(len);
+            } else {
+                // default: pink
+                seed = makePink(len);
             }
-        } catch {}
+
+        } catch (e) {
+            console.warn("[RC] seed build failed", e);
+            seed = null;
+        }
 
         console.log("[RC] seed check", seed?.length, seed?.[0]);
 
-        // 建 buffer
-        const bf = this.actx.createBuffer(2, sr, sr);
+        // seed 安全檢查（保持你原本的 fallback）
+        if (!seed || !seed.length) {
+            console.warn("[RC] seed invalid, injecting pink noise");
+            const len = Math.max(2048, Math.round(sr / Math.max(1e-6, f)));
+            seed = new Float32Array(len);
+            for (let i = 0; i < len; i++) seed[i] = Math.random() * 2 - 1;
+        }
 
-        // smoothing（auto from options）
-        let smoothingFactor = 0.2;
-        try {
-            const inv127 = this.midiSynth?.inv127 ?? (1/127);
-            const nn = Math.pow(note/64, 0.5) || 0;
-            const baseDamp = (note * inv127) * 0.85 + 0.15;
-            const varAmt = Number(this.midiSynth?.options?.[ch]?.stringDampingVariation ?? 0);
-            smoothingFactor = baseDamp + nn*(1-baseDamp)*0.5 + (1-baseDamp)*Math.random()*varAmt;
-        } catch {}
+
+        // 建 buffer
+        let durSec = Number(params.ksDurSec);
+        if (!Number.isFinite(durSec)) durSec = 1.0;
+        durSec = Math.min(Math.max(durSec, 0.1), 10.0);
+
+        const frames = Math.round(sr * durSec);
+        const bf = this.actx.createBuffer(2, frames, sr);
+
+        // === smoothingFactor：支援 auto / manual ===
+        const mode = String(params.smoothingMode ?? "auto");
+        const opts = this.midiSynth?.options?.[ch] ?? {};
+
+        let smoothingFactor;
+
+        if (mode === "manual") {
+            // 手動模式：直接吃 GUI 的 smoothingFactor（0..1）
+            let s = Number(params.smoothingFactor);
+            if (!Number.isFinite(s)) s = 0.2;
+
+            // 稍微夾一下範圍，避免 0 或 1 太極端
+            if (s < 0.01) s = 0.01;
+            if (s > 0.99) s = 0.99;
+
+            smoothingFactor = s;
+        } else {
+            // auto 模式：沿用原本 midi_synth-gui.js 的算法
+            try {
+                const inv127 = this.midiSynth?.inv127 ?? (1 / 127);
+                const nn = Math.pow(note / 64, 0.5) || 0;
+
+                // 基本 damping，跟 note 有關
+                let stringDamping = (note * inv127) * 0.85 + 0.15;
+
+                // 若 options[ch].stringDamping 有被 GUI 改過，就尊重它
+                if (typeof opts.stringDamping === "number") {
+                    stringDamping = opts.stringDamping;
+                } else if (this.midiSynth?.options?.[ch]) {
+                    // 順便寫回去，跟舊版行為接近
+                    this.midiSynth.options[ch].stringDamping = stringDamping;
+                }
+
+                const varAmt = Number(opts.stringDampingVariation ?? 0);
+
+                smoothingFactor =
+                    stringDamping +
+                    nn * (1 - stringDamping) * 0.5 +
+                    (1 - stringDamping) * Math.random() * varAmt;
+            } catch {
+                smoothingFactor = 0.2;
+            }
+        }
+
+        if (!Number.isFinite(smoothingFactor)) smoothingFactor = 0.2;
+
 
         const velScale = Number(params.velScale == null ? 1 : params.velScale);
 
         // 修正 opts 未定義問題
-        const opts = this.midiSynth?.options?.[ch] ?? {};
+        // const opts = this.midiSynth?.options?.[ch] ?? {};
         if (Object.keys(opts).length === 0) {
             opts.stringDamping = 0.5;
             opts.stringDampingVariation = 0.2;
@@ -609,9 +778,16 @@ export class AudioEngine {
         // 呼叫 asm pluck
         try {
             const aw = this.midiSynth?.asmWrapper?.[ch];
-            const opts = this.midiSynth?.options?.[ch] ?? {};
             if (aw && typeof aw.pluck === "function") {
-                aw.pluck(bf, seed, sr, f, smoothingFactor, velocity * velScale, opts, 0.2);
+                aw.pluck(
+                    bf, 
+                    seed, 
+                    sr, 
+                    f, 
+                    smoothingFactor, 
+                    velocity * velScale, 
+                    opts, 
+                    0.2);
             }
         } catch (e) {
             console.warn("[RC] pluck error", e);
@@ -621,43 +797,72 @@ export class AudioEngine {
         const bfs = this.actx.createBufferSource();
         bfs.buffer = bf;
 
-        try { const modNode = this.midiSynth?.chmod?.[ch]; if (modNode && bfs.detune) modNode.connect(bfs.detune); } catch {}
-        try { const bendVal = this.midiSynth?.bend?.[ch]; if (typeof bendVal === "number" && bfs.detune) bfs.detune.value = bendVal; } catch {}
+        try {
+            const modNode = this.midiSynth?.chmod?.[ch];
+            if (modNode && bfs.detune) modNode.connect(bfs.detune);
+        } catch {}
+        try {
+            const bendVal = this.midiSynth?.bend?.[ch];
+            if (typeof bendVal === "number" && bfs.detune) bfs.detune.value = bendVal;
+        } catch {}
 
-        // 清理 bfSet
+        // ⭐ 每個 KS voice 自己的 envelope，用來做 noteOff 的漸弱
+        const env = this.actx.createGain();
+        env.gain.setValueAtTime(1, this.actx.currentTime);
+
+        // ⭐ KS voice registry（讓 gate() 的 noteOff 找得到）
+        if (!this.liveNodes.has("__ksVoices__")) this.liveNodes.set("__ksVoices__", {});
+        const ksVoicesByCh = this.liveNodes.get("__ksVoices__");
+        if (!ksVoicesByCh[ch]) ksVoicesByCh[ch] = {};
+
+        // 允許同一個 note 疊音 → 給每個 voice 一個 id
+        const voiceId = `${note}_${performance.now().toFixed(1)}_${Math.random().toString(36).slice(2, 5)}`;
+
+        ksVoicesByCh[ch][voiceId] = {
+            note,
+            bfs,
+            env,
+            params,      // 之後 noteOff 要讀 ksRelease 等可以從這裡拿
+            sustained: false
+        };
+
+        // 清理 bfSet & __ksVoices__（當 buffer 播完時）
         bfs.addEventListener("ended", () => {
             try {
-                if (this.midiSynth?.bfSet?.[ch]?.[note] === bfs) this.midiSynth.bfSet[ch][note] = null;
+                if (this.midiSynth?.bfSet?.[ch]?.[note] === bfs) {
+                    this.midiSynth.bfSet[ch][note] = null;
+                }
+            } catch {}
+
+            try {
+                const map = this.liveNodes.get("__ksVoices__");
+                if (map && map[ch] && map[ch][voiceId]) {
+                    delete map[ch][voiceId];
+                }
             } catch {}
         });
+
+        // 原本的 bfSet 註冊保留
         try {
             if (!this.midiSynth.bfSet) this.midiSynth.bfSet = {};
             if (!this.midiSynth.bfSet[ch]) this.midiSynth.bfSet[ch] = {};
             this.midiSynth.bfSet[ch][note] = bfs;
         } catch {}
 
-        // 確保 chain tail 連到 chvol[ch]（只接一次）
+        // 確保 chain tail 連到 mixer（保留你原來這一大段）
         try {
             const tailKey = key.replace(":ksOut", ":tail");
             const tail = this.liveNodes.get(tailKey) || this.liveNodes.get("__chainTail__");
             const chVol = this.midiSynth?.chvol?.[ch];
-            const tag = `__tail_to_chvol_${ch}__`;
-            // if (tail && chVol && !this.liveNodes.has(tag)) {
-            //     tail.connect(chVol);
-            //     this.liveNodes.set(tag, true);
-            //     console.log(`[RC] tail connected -> chvol[${ch}]`);
-            // }
-            
+
             try {
                 const mix = this.mixers?.[ch];
                 if (tail && mix) {
-                    // 同一個 context 才能接
                     if (tail.context === this.actx && mix.context === this.actx) {
                         tail.connect(mix);
-                        // console.log(`[RC] chain tail connected -> mixer ch=${ch}`);
                     } else {
                         console.warn('[RC] context mismatch detected, re-adopting synth context');
-                        this.setMidiSynth(this.midiSynth); // 重新採用並重建
+                        this.setMidiSynth(this.midiSynth);
                         try {
                             const m2 = this.mixers?.[ch];
                             if (tail.context === this.actx && m2?.context === this.actx) {
@@ -672,8 +877,16 @@ export class AudioEngine {
 
         } catch {}
 
-        // 連上 ks_source 的 out（讓後續節點運作）
-        bfs.connect(outNode);
+        // ⭐ 這裡改成：bfs → env → ksOut
+        bfs.connect(env);
+        for (const node of targets) {
+            try {
+                env.connect(node);
+            } catch (e) {
+                console.warn("[RC] env.connect ksOut failed", e);
+            }
+        }
+
         bfs.start();
         return true;
     }
@@ -682,19 +895,75 @@ export class AudioEngine {
     gateOsc(ch, note, velocity) {
         const allOsc = Array.from(this.liveNodes.entries()).filter(([k]) => k.endsWith(":osc"));
         if (!allOsc.length) return false;
+
+        let triggered = false;
+        const nn = (note == null ? 69 : note) | 0;
+        const now = this.actx.currentTime;
+        const a4  = (this.midiSynth && typeof this.midiSynth.a4_freq === "number") ? this.midiSynth.a4_freq : 440;
+        const f   = a4 * Math.pow(2, (nn - 69) / 12);
+
         for (const [key, osc] of allOsc) {
-            const env = this.liveNodes.get(key.replace(":osc", ":env"));
-            if (!env) continue;
-            const now = this.actx.currentTime;
-            const f = this.midiSynth?.a4_freq * Math.pow(2, (note - 69) / 12);
-            try { osc.frequency.setValueAtTime(f, now); } catch {}
-            env.gain.cancelScheduledValues(now);
-            env.gain.setValueAtTime(0, now);
-            env.gain.linearRampToValueAtTime(velocity, now + 0.01);
-            env.gain.linearRampToValueAtTime(0, now + 0.4);
+        // 看這個 source 設定的 ch 是否符合
+        const modId = key.replace(":osc", "");
+        const chSel = this.liveNodes.get(modId + ":ch") ?? "all";
+        const chOK  = (chSel === "all") || (Number(chSel) === ch);
+        if (!chOK) continue;
+
+        const env = this.liveNodes.get(modId + ":env");
+        const adsr = this.liveNodes.get(modId + ":adsr") || { a:0.003, d:0.08, s:0.4, r:0.2 };
+        if (!env) continue;
+
+        try {
+            osc.frequency.setValueAtTime(f, now);
+        } catch {}
+
+        const { a, d, s, r } = adsr;
+
+        env.gain.cancelScheduledValues(now);
+        env.gain.setValueAtTime(0, now);
+        env.gain.linearRampToValueAtTime(velocity, now + (a ?? 0.003));
+        env.gain.linearRampToValueAtTime(
+            (s ?? 0.4) * velocity,
+            now + (a ?? 0.003) + (d ?? 0.08)
+        );
+        env.gain.linearRampToValueAtTime(0, now + (a ?? 0.003) + (d ?? 0.08) + (r ?? 0.2));
+
+        triggered = true;
         }
-        return true;
+
+        return triggered;
     }
+
+
+    releaseSustainKSForChannel(ch) {
+        const now = this.actx.currentTime;
+        const ksVoicesByCh = this.liveNodes.get("__ksVoices__");
+        if (!ksVoicesByCh || !ksVoicesByCh[ch]) return;
+
+        for (const [id, v] of Object.entries(ksVoicesByCh[ch])) {
+            if (!v.sustained) continue;
+
+            const { bfs, env, params } = v;
+            const relCtrl = Number(params?.ksRelease ?? 0.5);
+            const minR = 0.02;
+            const maxR = 1.5;
+            const rKs = minR + (maxR - minR) * Math.pow(relCtrl, 2.0);
+
+            env.gain.cancelScheduledValues(now);
+            env.gain.setValueAtTime(env.gain.value ?? 1, now);
+            env.gain.linearRampToValueAtTime(0, now + rKs);
+            bfs.stop(now + rKs + 0.05);
+
+            v.sustained = false;
+
+            setTimeout(() => {
+                try { bfs.disconnect(); env.disconnect(); } catch {}
+                delete ksVoicesByCh[ch][id];
+            }, (rKs + 0.05) * 1000);
+        }
+    }
+
+
 
   // --------------------------------------------------------------------
   // Receive raw MIDI data (Uint8Array)

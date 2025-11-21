@@ -76,7 +76,7 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam }) {
             <div className="flex items-center gap-2">
               <div className="w-24 text-sm opacity-80">MIDI ch</div>
               <select
-                className="bg-transparent border border-white/10 rounded-lg px-2 py-1"
+                className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
                 value={String(params.ch ?? "all")}
                 onChange={(e) => onParam("ch", e.target.value)}
               >
@@ -89,36 +89,38 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam }) {
               </select>
             </div>
 
-            {/* Program match */}
+            {/* Program match (含 all) */}
             <div className="flex items-center gap-2">
               <div className="w-24 text-sm opacity-80">Program</div>
-              <input
-                type="number"
-                min={0}
-                max={127}
-                className="bg-transparent border border-white/10 rounded-lg px-2 py-1 w-24"
-                value={Number(params.program ?? 0)}
-                onChange={(e) => onParam("program", Number(e.target.value))}
-              />
+              <select
+                className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
+                value={String(params.program ?? "all")}
+                onChange={(e) => onParam("program", e.target.value)}
+              >
+                <option value="all">all</option>
+                {Array.from({ length: 128 }, (_, i) => (
+                  <option key={i} value={String(i)}>
+                    {i}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Smoothing mode */}
             <div className="flex items-center gap-2">
               <div className="w-24 text-sm opacity-80">smoothing</div>
               <select
-                className="bg-transparent border border-white/10 rounded-lg px-2 py-1"
+                className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
                 value={String(params.smoothingMode ?? "auto")}
                 onChange={(e) => onParam("smoothingMode", e.target.value)}
               >
                 {["auto", "manual"].map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
+                  <option key={t} value={t}>{t}</option>
                 ))}
               </select>
             </div>
 
-            {/* Manual smoothing */}
+            {/* Manual smoothing slider */}
             {String(params.smoothingMode ?? "auto") === "manual" && (
               <ParamSlider
                 label="smooth"
@@ -138,31 +140,50 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam }) {
               onChange={(v) => onParam("velScale", v)}
             />
 
-            
+            {/* KS Duration */}
+            <ParamSlider
+              label="KS dur"
+              min={0.1}
+              max={10}
+              step={0.1}
+              value={Number(params.ksDurSec ?? 1)}
+              onChange={(v) => onParam("ksDurSec", v)}
+              suffix="s"
+            />
 
-            {/* Seed type */}
+            {/* KS Release */}
+            <ParamSlider
+              label="Release"
+              min={0}
+              max={1}
+              step={0.01}
+              value={Number(params.ksRelease ?? 0.5)}
+              onChange={(v) => onParam("ksRelease", v)}
+            />
+
+            {/* Seed type - 音樂化 Soft/Warm/Bright/Mix（值不變） */}
             <div className="flex items-center gap-2">
-              <div className="w-24 text-sm opacity-80">seed</div>
+              <div className="w-24 text-sm opacity-80">Noise</div>
               <select
-                className="bg-transparent border border-white/10 rounded-lg px-2 py-1"
+                className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
                 value={String(params.seedNoiseType ?? "pink")}
                 onChange={(e) => onParam("seedNoiseType", e.target.value)}
               >
-                {["pink", "white", "synthPink"].map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
+                <option value="brown">Soft</option>   {/* 原 brown */}
+                <option value="pink">Warm</option>    {/* 原 pink */}
+                <option value="white">Bright</option> {/* 原 white */}
+                <option value="grey">Mix</option>     {/* 原 grey */}
               </select>
             </div>
 
             {String(params.smoothingMode ?? "auto") === "auto" && (
               <div className="text-[11px] opacity-70">
-                auto: smoothing 依據 synth.options[ch].stringDamping / stringDampingVariation 與 note 計算
+                auto: smoothing 依據 synth.options[ch].stringDamping / variation 與 note 計算
               </div>
             )}
           </>
         )}
+
 
         {/* basic oscillator source */}
         {kind === "source" && (
@@ -170,7 +191,7 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam }) {
             <div className="flex items-center gap-2">
                 <div className="w-24 text-sm opacity-80">MIDI ch</div>
                 <select
-                    className="bg-transparent border border-white/10 rounded-lg px-2 py-1"
+                    className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
                     value={String(mod.params.ch ?? "all")}
                     onChange={(e) => onParam("ch", e.target.value)}
                 >
@@ -184,7 +205,7 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam }) {
             <div className="flex items-center gap-2">
                 <div className="w-24 text-sm opacity-80">wave</div>
                 <select
-                    className="bg-transparent border border-white/10 rounded-lg px-2 py-1"
+                    className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
                     value={String(mod.params.type)}
                     onChange={(e) => onParam("type", e.target.value)}
                 >
@@ -216,7 +237,7 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam }) {
             <div className="flex items-center gap-2">
               <div className="w-24 text-sm opacity-80">mode</div>
               <select
-                className="bg-transparent border border-white/10 rounded-lg px-2 py-1"
+                className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
                 value={String(params.mode ?? "lowpass")}
                 onChange={(e) => onParam("mode", e.target.value)}
               >
@@ -297,7 +318,7 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam }) {
             <div className="flex items-center gap-2">
               <div className="w-24 text-sm opacity-80">IR</div>
               <select
-                className="bg-transparent border border-white/10 rounded-lg px-2 py-1"
+                className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
                 value={String(params.irId ?? "IR_Gibson")}
                 onChange={(e) => onParam("irId", e.target.value)}
               >

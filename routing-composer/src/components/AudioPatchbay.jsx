@@ -28,6 +28,9 @@ export default function AudioPatchbay({ synth, buttonTarget, autoTailwind = fals
     resumeAll();
   }, [open]);
 
+
+  const [masterVol, setMasterVol] = useState(0.3);
+
   const [a4, setA4] = useState(() => synth?.a4_freq ?? 440);
   useEffect(() => {
     if (typeof synth?.a4_freq === 'number') setA4(Number(synth.a4_freq));
@@ -210,6 +213,28 @@ export default function AudioPatchbay({ synth, buttonTarget, autoTailwind = fals
                         }}
                       />
                       <span>{a4.toFixed(1)}Hz</span>
+                    </div>
+
+                    {/* ⭐ 新增：主音量 */}
+                    <div className="flex items-center gap-2 text-sm opacity-90">
+                      <span>Vol</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={masterVol}
+                        className="rc-slider"
+                        style={{ "--rc-pos": `${masterVol * 100}%`, width: 160 }}
+                        onChange={(e) => {
+                          const v = Number(e.target.value);
+                          if (!Number.isNaN(v)) {
+                            setMasterVol(v);
+                            if (midi_synth) midi_synth.setMasterVol(v);
+                          }
+                        }}
+                      />
+                      <span>{(masterVol * 100).toFixed(0)}%</span>
                     </div>
                 </div>
 
