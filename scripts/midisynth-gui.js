@@ -864,7 +864,7 @@ function MidiSynthCore(target){
             
             if(this.pg[ch]===-1)
                 this._note(t,ch,note,vel);
-            else if (this.pg[ch] === 48) { 
+            else if (this.pg[ch] === 480) { 
                 const f  = this.a4_freq * (2 ** ((note - 69) / 12.0));
                 const bf = this._renderBowedWaveguideBuffer(ch, f, 2.0, vel);
 
