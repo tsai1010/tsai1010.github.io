@@ -656,8 +656,22 @@ function MidiSynthCore(target){
             this.ex[ch]=v*v/(127*127);
             this.chvol[ch].gain.setValueAtTime(this.vol[ch]*this.ex[ch],this._tsConv(t));
         },
-        setPedal:(ch,v)=>{
-            this.pedal[ch]=v;
+        setPedal:(ch, v) => {
+            // 踏板舊狀態（>=64 視為 ON）
+            const prev = this.pedal[ch] ?? 0;
+            const wasOn = prev >= 64;
+
+            // 更新成新的值
+            this.pedal[ch] = v;
+
+            const nowOn = v >= 64;
+
+            // ⭐ 從 ON → OFF 的瞬間，請 AudioEngine 把 KS sustain 的音放掉
+            if (wasOn && !nowOn) {
+                if (this.audioEngine && typeof this.audioEngine.releaseSustainKSForChannel === "function") {
+                    this.audioEngine.releaseSustainKSForChannel(ch);
+                }
+            }
         },
         allSoundOff:(ch)=>{
             // for(let i=this.notetab.length-1;i>=0;--i){
