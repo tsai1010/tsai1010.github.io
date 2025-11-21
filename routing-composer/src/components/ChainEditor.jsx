@@ -18,7 +18,7 @@ const cardClass =
 const MODULES = ["ks_source", "source", "filter", "delay", "reverb", "convolver_ir", "gain", "analyzer"];
 
 const DEFAULT_PARAMS = {
-  ks_source: { smoothingMode: "auto", smoothingFactor: 0.2, velScale: 1.0, seedNoiseType: "pink", useSynthA4: true, ch: "all", program: 0 },
+  ks_source: { smoothingMode: "auto", smoothingFactor: 0.2, velScale: 1.0, seedNoiseType: "pink", useSynthA4: true, ch: "all", program: "all" },
   source: { 
     type: "sawtooth",
     ch: "all",                 // ← 新增：目標 MIDI channel（"all" | 0..15）
