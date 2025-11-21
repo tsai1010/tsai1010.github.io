@@ -24,6 +24,8 @@ async function initAudio() {
     ctxStart = true;
     console.log("AudioContext 1.0已啟動:", ctx);
 
+    AudioBtn();
+
     // ✅ 只有 GUI 版本才有這個函式
     if (typeof midi_synth.enableRoutingComposer === "function") {
       await midi_synth.enableRoutingComposer({
