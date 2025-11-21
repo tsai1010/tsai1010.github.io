@@ -296,9 +296,9 @@ export class AudioEngine {
         console.warn("[RC] mixer connect failed", e);
     }
 
-    if (tail && m.kind === "gain") {
-        tail.connect(this.mixers[ch]); // 最後的 gain → mixer
-    }
+    // if (tail && m.kind === "gain") {
+    //     tail.connect(this.mixers[ch]); // 最後的 gain → mixer
+    // }
 
     
   }
@@ -307,175 +307,200 @@ export class AudioEngine {
   // buildMany — For multiple chains
   // --------------------------------------------------------------------
   buildMany(chains) {
-    this.liveNodes.clear();
     const prev = this.liveNodes;
-    const buildOne = (c) => {
-      const tmp = new Map();
-      this.liveNodes = tmp;
-      this.build(c);
-      for (const [k, v] of this.liveNodes.entries()) prev.set(k, v);
-      this.liveNodes = prev;
-    };
-    chains.forEach(buildOne);
+    // 把目前還在發聲的 fallback osc voice map（給 gate 的 noteOff 用）先暫存
+    const oscVoices = prev.get("__oscVoices__");
+
+    const merged = new Map();  // 不再從 prev 開始
+
+    for (const chain of chains) {
+      const temp = new Map();
+      this.liveNodes = temp;
+      this.build(chain);   // 對單一 chain 寫進 temp
+
+      for (const [k, v] of temp.entries()) {
+        merged.set(k, v);  // 合併多條 chain 的 node
+      }
+    }
+
+    // 把還在發聲的 fallback voices 放回去（可有可無，不留也只是有時候 noteOff 找不到它們而已）
+    if (oscVoices) {
+      merged.set("__oscVoices__", oscVoices);
+    }
+
+    this.liveNodes = merged;
   }
+
 
   // --------------------------------------------------------------------
   // MIDI Note Handling
   // --------------------------------------------------------------------
   gate(on, velocity = 0.8, ch = 0, note = 69) {
     const now = this.actx.currentTime;
+    const nn  = (note == null ? 69 : note) | 0;
 
-    // === 1️⃣ 先試 KS ===
+    // === 1️⃣ Note On：先試 KS + GUI 內的 source（gateOsc）===
     let triggered = false;
+
     if (on) {
-        triggered = this.pluckKS(ch, note ?? 69, velocity);
+      // (a) KS pluck
+      const ksOk  = this.pluckKS(ch, nn, velocity) === true;
+
+      // 若沒找到 KS (返回 false)，就 fallback 用 gateOsc()
+      let oscOk = false;
+      if (!ksOk) {
+        oscOk = this.gateOsc(ch, note, velocity) === true;
+      }
+
+      triggered = ksOk || oscOk;
     }
 
-    // === 2️⃣ 若 KS 沒命中 → 動態建立 OSC 音 ===
+    // === 2️⃣ 如果 KS + gateOsc 都沒命中，再用舊的 fallback 動態 OSC ===
+    //     （這一段只有在沒有任何 GUI module 可以處理時才會跑）
     if (on && !triggered) {
-        const a4 = (this.midiSynth && typeof this.midiSynth.a4_freq === "number") ? this.midiSynth.a4_freq : 440;
-        const f = a4 * Math.pow(2, (note - 69) / 12);
-        const now = this.actx.currentTime;
+      const a4 = (this.midiSynth && typeof this.midiSynth.a4_freq === "number")
+        ? this.midiSynth.a4_freq
+        : 440;
+      const f = a4 * Math.pow(2, (nn - 69) / 12);
 
-        // 掃描所有 source module，挑出 ch 符合的
-        const sources = [];
-        for (const [k, v] of this.liveNodes.entries()) {
-            if (k.endsWith(":oscType")) {
-            const modId = k.split(":")[0];
-            const chSel = this.liveNodes.get(modId + ":ch") ?? "all";
-            const adsr  = this.liveNodes.get(modId + ":adsr") || { a:0.003, d:0.08, s:0.4, r:0.2 };
-            const type  = v || "sawtooth";
-            const chOK  = (chSel === "all") || (Number(chSel) === ch);
-            if (chOK) sources.push({ modId, type, adsr });
-            }
+      // 掃描所有 source module，挑出 ch 符合的
+      const sources = [];
+      for (const [k, v] of this.liveNodes.entries()) {
+        if (k.endsWith(":oscType")) {
+          const modId = k.split(":")[0];
+          const chSel = this.liveNodes.get(modId + ":ch") ?? "all";
+          const adsr  = this.liveNodes.get(modId + ":adsr") || { a: 0.003, d: 0.08, s: 0.4, r: 0.2 };
+          const type  = v || "sawtooth";
+          const chOK  = (chSel === "all") || (Number(chSel) === ch);
+          if (chOK) sources.push({ modId, type, adsr });
+        }
+      }
+
+      // 若沒有任何 source 符合，就直接用 __oscType__ + 預設 ADSR 當作 fallback
+      if (!sources.length) {
+        const type = this.liveNodes.get("__oscType__") || "sawtooth";
+        sources.push({
+          modId: null,
+          type,
+          adsr: { a: 0.003, d: 0.08, s: 0.4, r: 0.2 },
+        });
+      }
+
+      const tail  = this.liveNodes.get("__chainTail__");
+      const head  = this.liveNodes.get("__chainHead__");
+      const kbt   = this.liveNodes.get("keyboardTarget");
+      const chVol = this.midiSynth?.chvol?.[ch];
+
+      // 確保 voice map：按 channel 分組
+      if (!this.liveNodes.has("__oscVoices__")) this.liveNodes.set("__oscVoices__", {});
+      const voicesByCh = this.liveNodes.get("__oscVoices__");
+      if (!voicesByCh[ch]) voicesByCh[ch] = {};
+
+      for (const src of sources) {
+        const osc = this.actx.createOscillator();
+        try { osc.type = src.type; } catch { osc.type = "sawtooth"; }
+        osc.frequency.setValueAtTime(f, now);
+
+        // modulation & pitch bend
+        try {
+          const modNode = this.midiSynth?.chmod?.[ch];
+          if (modNode && osc.detune) modNode.connect(osc.detune);
+
+          const bendCS = this.getBendNode(ch);
+          if (osc.detune && bendCS) bendCS.connect(osc.detune);
+
+          if (typeof this.midiSynth?.bend?.[ch] === "number") {
+            this.updateBend(ch, this.midiSynth.bend[ch]);
+          }
+        } catch (e) {
+          console.warn("[RC] osc detune connect failed", e);
         }
 
-        // 若沒有任何 source 符合，就直接用 __oscType__ + 預設 ADSR 當作 fallback
-        if (!sources.length) {
-            const type = this.liveNodes.get("__oscType__") || "sawtooth";
-            sources.push({ modId: null, type, adsr: { a:0.003,d:0.08,s:0.4,r:0.2 } });
-        }
+        const env = this.actx.createGain();
+        env.gain.setValueAtTime(0, now);
 
-        const tail = this.liveNodes.get("__chainTail__");
-        const head = this.liveNodes.get("__chainHead__");
-        const kbt  = this.liveNodes.get("keyboardTarget");
-        const chVol = this.midiSynth?.chvol?.[ch];
+        // 使用該 source 的 ADSR
+        const { a, d, s, r } = src.adsr;
+        env.gain.linearRampToValueAtTime(velocity, now + (a ?? 0.003));
+        env.gain.linearRampToValueAtTime(
+          (s ?? 0.4) * velocity,
+          now + (a ?? 0.003) + (d ?? 0.08)
+        );
 
-        // 確保 voice map：按 channel 分組
-        if (!this.liveNodes.has("__oscVoices__")) this.liveNodes.set("__oscVoices__", {});
-        const voicesByCh = this.liveNodes.get("__oscVoices__");
-        if (!voicesByCh[ch]) voicesByCh[ch] = {};
+        osc.connect(env);
 
-        for (const src of sources) {
-            const osc = this.actx.createOscillator();
-            try { osc.type = src.type; } catch { osc.type = "sawtooth"; }
-                osc.frequency.setValueAtTime(f, now);
+        // 避免把聲音塞進關著的 keyboardTarget，優先 tail → 再 head → 再 chvol
+        let inject = null;
+        if (head && head !== kbt) inject = head;
+        else if (tail)           inject = tail;
+        else if (chVol)          inject = chVol;
+        if (!inject && chVol)    inject = chVol;
 
-                // === modulation & pitch bend ===
+        if (inject) {
+          env.connect(inject);
+
+          // 確保 tail → mixer[ch] 有接起來
+          try {
+            const mix = this.mixers?.[ch];
+            if (tail && mix) {
+              if (tail.context === this.actx && mix.context === this.actx) {
+                tail.connect(mix);
+              } else {
+                console.warn("[RC] context mismatch detected, re-adopting synth context");
+                this.setMidiSynth(this.midiSynth);
                 try {
-                // (a) mod wheel：你的 chmod[ch] → detune（保持不變）
-                const modNode = this.midiSynth?.chmod?.[ch];
-                if (modNode && osc.detune) modNode.connect(osc.detune);
-
-                // (b) pitch bend：每個 ch 一顆 ConstantSource，連到 detune
-                const bendCS = this.getBendNode(ch);
-                if (osc.detune && bendCS) {
-                    // 避免重覆連線（瀏覽器通常允許重覆，不過保險寫法）
-                    bendCS.connect(osc.detune);
-                }
-
-                // 初值同步目前 synth 的 bend（若有）
-                if (typeof this.midiSynth?.bend?.[ch] === 'number') {
-                    this.updateBend(ch, this.midiSynth.bend[ch]);
-                }
-            } catch (e) {
-                console.warn('[RC] osc detune connect failed', e);
-            }
-
-            const env = this.actx.createGain();
-            env.gain.setValueAtTime(0, now);
-
-            // 使用該 source 的 ADSR
-            const { a, d, s, r } = src.adsr;
-            env.gain.linearRampToValueAtTime(velocity, now + (a ?? 0.003));
-            env.gain.linearRampToValueAtTime((s ?? 0.4) * velocity, now + (a ?? 0.003) + (d ?? 0.08));
-
-            osc.connect(env);
-
-            // 避免把聲音塞進關著的 keyboardTarget，優先 tail → 再 head → 再 chvol
-            let inject = null;
-            if (head && head !== kbt) inject = head;
-            else if (tail)           inject = tail;
-            else if (chVol)          inject = chVol;
-            if (!inject && chVol)    inject = chVol;
-            if (inject) {
-                env.connect(inject);
-                // 一次性確保 tail → chvol[ch]
-                try {
-                    const tag = `__tail_to_chvol_${ch}__`;
-                    
-                    try {
-                        const mix = this.mixers?.[ch];
-                        if (tail && mix) {
-                                // 同一個 context 才能接
-                                if (tail.context === this.actx && mix.context === this.actx) {
-                                tail.connect(mix);
-                                // console.log(`[RC] chain tail connected -> mixer ch=${ch}`);
-                            } else {
-                                console.warn('[RC] context mismatch detected, re-adopting synth context');
-                                this.setMidiSynth(this.midiSynth); // 重新採用並重建
-                                try {
-                                    const m2 = this.mixers?.[ch];
-                                    if (tail.context === this.actx && m2?.context === this.actx) {
-                                    tail.connect(m2);
-                                    }
-                                } catch {}
-                            }
-                        }
-                    } catch (e) {
-                        console.warn('[RC] mixer connect failed', e);
-                    }
-
+                  const m2 = this.mixers?.[ch];
+                  if (tail.context === this.actx && m2?.context === this.actx) {
+                    tail.connect(m2);
+                  }
                 } catch {}
+              }
             }
-
-            osc.start(now);
-
-            // 以 ch 分組、每顆 voice 有自己的 id（支援同 note 疊音）
-            const vid = `${note}_${performance.now().toFixed(1)}_${Math.random().toString(36).slice(2,5)}`;
-            voicesByCh[ch][vid] = { note, osc, env, r: (r ?? 0.2) };
-
-            // 診斷
-            // console.log(`[RC] osc start ch=${ch} note=${note} type=${src.type} adsr=`, src.adsr);
+          } catch (e) {
+            console.warn("[RC] mixer connect failed", e);
+          }
         }
+
+        osc.start(now);
+
+        // 以 ch 分組、每顆 voice 有自己的 id（支援同 note 疊音）
+        const vid = `${nn}_${performance.now().toFixed(1)}_${Math.random()
+          .toString(36)
+          .slice(2, 5)}`;
+        voicesByCh[ch][vid] = { note: nn, osc, env, r: (r ?? 0.2) };
+      }
     }
 
-    // === 3️⃣ noteOff：停止該音 ===
+    // === 3️⃣ Note Off：只管 fallback poly osc 的收尾 ===
     if (!on) {
-        const now2 = this.actx.currentTime;
-        const voicesByCh = this.liveNodes.get("__oscVoices__");
-        if (!voicesByCh || !voicesByCh[ch]) return;
+      const now2 = this.actx.currentTime;
+      const voicesByCh = this.liveNodes.get("__oscVoices__");
+      if (!voicesByCh || !voicesByCh[ch]) return;
 
-        const entries = Object.entries(voicesByCh[ch]).filter(([id, v]) => v.note === note);
-        for (const [id, v] of entries) {
-            const { osc, env, r = 0.2 } = v;
+      const entries = Object.entries(voicesByCh[ch]).filter(
+        ([id, v]) => v.note === nn
+      );
+      for (const [id, v] of entries) {
+        const { osc, env, r = 0.2 } = v;
+        try {
+          env.gain.cancelScheduledValues(now2);
+          env.gain.setValueAtTime(env.gain.value ?? 0, now2);
+          env.gain.linearRampToValueAtTime(0, now2 + r);
+          osc.stop(now2 + r + 0.05);
+          setTimeout(() => {
             try {
-                env.gain.cancelScheduledValues(now2);
-                env.gain.setValueAtTime(env.gain.value ?? 0, now2);
-                env.gain.linearRampToValueAtTime(0, now2 + r);
-                osc.stop(now2 + r + 0.05);
-                setTimeout(() => {
-                    try { osc.disconnect(); env.disconnect(); } catch {}
-                    delete voicesByCh[ch][id];
-                }, (r + 0.1) * 1000);
-                // console.log(`[RC] osc stop ch=${ch} note=${note} id=${id}`);
-                } catch (e) {
-                // console.warn('[RC] osc stop failed', e);
-                delete voicesByCh[ch][id];
-            }
+              osc.disconnect();
+              env.disconnect();
+            } catch {}
+            delete voicesByCh[ch][id];
+          }, (r + 0.1) * 1000);
+        } catch (e) {
+          delete voicesByCh[ch][id];
         }
+      }
     }
   }
+
 
 
   
@@ -653,6 +678,23 @@ export class AudioEngine {
         return true;
     }
 
+
+    gateOsc(ch, note, velocity) {
+        const allOsc = Array.from(this.liveNodes.entries()).filter(([k]) => k.endsWith(":osc"));
+        if (!allOsc.length) return false;
+        for (const [key, osc] of allOsc) {
+            const env = this.liveNodes.get(key.replace(":osc", ":env"));
+            if (!env) continue;
+            const now = this.actx.currentTime;
+            const f = this.midiSynth?.a4_freq * Math.pow(2, (note - 69) / 12);
+            try { osc.frequency.setValueAtTime(f, now); } catch {}
+            env.gain.cancelScheduledValues(now);
+            env.gain.setValueAtTime(0, now);
+            env.gain.linearRampToValueAtTime(velocity, now + 0.01);
+            env.gain.linearRampToValueAtTime(0, now + 0.4);
+        }
+        return true;
+    }
 
   // --------------------------------------------------------------------
   // Receive raw MIDI data (Uint8Array)

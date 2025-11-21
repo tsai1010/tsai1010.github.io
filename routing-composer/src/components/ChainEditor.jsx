@@ -75,13 +75,11 @@ export default function ChainEditor({ synth }) {
   }, [engine]);
 
   // 狀態：chains
-  const [chains, setChains] = useState([
-    [
-      { id: uid("src"), kind: "source", enabled: true, params: { ...DEFAULT_PARAMS.source } },
-      { id: uid("gain"), kind: "gain", enabled: true, params: { ...DEFAULT_PARAMS.gain } },
-      { id: uid("an"), kind: "analyzer", enabled: true, params: {} },
-    ],
-  ]);
+  const [chains, setChains] = useState([[
+    { id: uid("ks"), kind: "ks_source", enabled: true, params: { ...DEFAULT_PARAMS.ks_source } },
+    { id: uid("gain"), kind: "gain", enabled: true, params: { ...DEFAULT_PARAMS.gain } },
+    { id: uid("an"), kind: "analyzer", enabled: true, params: {} },
+  ]]);
 
   // 刪除確認彈窗
   const [confirmDel, setConfirmDel] = useState({ open: false, idx: null, step: 1 });
