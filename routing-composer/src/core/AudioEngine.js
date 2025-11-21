@@ -625,9 +625,10 @@ export class AudioEngine {
         try {
             const type = String(params.seedNoiseType ?? "pink");
 
-            // 共同使用的長度：跟頻率有關，比較合理
+            // 建議長度：跟頻率有關
             const len = Math.max(2048, Math.round(sr / Math.max(1e-6, f)));
 
+            // === 基本噪音 ===
             const makeWhite = (L) => {
                 const out = new Float32Array(L);
                 for (let i = 0; i < L; i++) out[i] = Math.random() * 2 - 1;
@@ -656,8 +657,7 @@ export class AudioEngine {
                 let acc = 0;
                 for (let i = 0; i < L; i++) {
                     acc += Math.random()*2 - 1;
-                    if (acc > 8) acc = 8;
-                    if (acc < -8) acc = -8;
+                    acc = Math.max(-8, Math.min(8, acc));
                     out[i] = acc / 8;
                 }
                 return out;
@@ -673,21 +673,206 @@ export class AudioEngine {
                 return out;
             };
 
-            if (type === "white") {
-                seed = makeWhite(len);
-            } else if (type === "brown") {
-                seed = makeBrown(len);
-            } else if (type === "grey" || type === "gray") {
-                seed = makeGrey(len);
-            } else {
-                // default: pink
-                seed = makePink(len);
+            // === 已有：更 soft / 彩色的變體 ===
+
+            // 🔴 Red Noise（Brown 的二次積分 = 最 soft）
+            const makeRed = (L) => {
+                const out = new Float32Array(L);
+                let x = 0, y = 0;
+                for (let i = 0; i < L; i++) {
+                    x += (Math.random()*2 - 1) * 0.02;
+                    y += x;
+                    out[i] = y * 0.0005; // scale
+                }
+                return out;
+            };
+
+            // 🔵 Blue Noise（差分）+ 強 LP → 柔和 friction 用
+            const makeBlue = (L) => {
+                const tmp = new Float32Array(L);
+                let last = 0;
+                for (let i = 0; i < L; i++) {
+                    const w = Math.random()*2 - 1;
+                    tmp[i] = w - last;
+                    last = w;
+                }
+                // soft 化
+                const out = new Float32Array(L);
+                let lp = 0;
+                for (let i = 0; i < L; i++) {
+                    lp = lp * 0.992 + tmp[i] * 0.008;
+                    out[i] = lp;
+                }
+                return out;
+            };
+
+            // 🟣 Violet Noise（高頻多）→ heavy LPF → 氣音
+            const makeViolet = (L) => {
+                const tmp = new Float32Array(L);
+                let last = 0;
+                for (let i = 0; i < L; i++) {
+                    const w = Math.random()*2 - 1;
+                    tmp[i] = w - last;
+                    last = w;
+                }
+                const out = new Float32Array(L);
+                let lp = 0;
+                for (let i = 0; i < L; i++) {
+                    lp = lp * 0.995 + tmp[i] * 0.005;
+                    out[i] = lp;
+                }
+                return out;
+            };
+
+            // 🍫 Soft Brown：Brown → LPF
+            const makeSoftBrown = (L) => {
+                const brown = makeBrown(L);
+                const out = new Float32Array(L);
+                let lp = 0;
+                for (let i = 0; i < L; i++) {
+                    lp = lp * 0.995 + brown[i] * 0.005;
+                    out[i] = lp * 0.9;
+                }
+                return out;
+            };
+
+            // 🌸 Soft Pink：Pink → LPF
+            const makeSoftPink = (L) => {
+                const pink = makePink(L);
+                const out = new Float32Array(L);
+                let lp = 0;
+                for (let i = 0; i < L; i++) {
+                    lp = lp * 0.993 + pink[i] * 0.007;
+                    out[i] = lp * 0.9;
+                }
+                return out;
+            };
+
+            // === 新增：Wind / Perlin / Formant / Dust / Wood ===
+
+            // 🌪 Wind / Turbulence：有緩慢 gust 的風聲感
+            const makeWind = (L) => {
+                const out = new Float32Array(L);
+                let lp = 0;     // 基本低通（風本身）
+                let env = 0;    // gust 包絡
+                for (let i = 0; i < L; i++) {
+                    const w = Math.random()*2 - 1;
+                    // 低通，讓能量偏低中頻
+                    lp = lp * 0.985 + w * 0.015;
+                    // 緩慢變化的 gust 包絡
+                    env = env * 0.995 + (Math.random()*2 - 1) * 0.005;
+                    const e = 0.6 + 0.4 * env;  // 0.2 ~ 1.0 左右
+                    out[i] = lp * e;
+                }
+                return out;
+            };
+
+            // 🧊 Perlin-like：平滑、有機的 value noise
+            const makePerlin = (L) => {
+                const out = new Float32Array(L);
+                const seg = Math.max(8, Math.floor(L / 64)); // 64 個控制點左右
+                const points = [];
+                const nPoints = Math.floor(L / seg) + 2;
+                for (let i = 0; i < nPoints; i++) {
+                    points[i] = Math.random()*2 - 1;
+                }
+                const fade = (t) => t*t*t*(t*(t*6 - 15) + 10); // Perlin 常用 fade
+                for (let i = 0; i < L; i++) {
+                    const x = i / seg;
+                    const i0 = Math.floor(x);
+                    const t = x - i0;
+                    const a = points[i0];
+                    const b = points[i0+1];
+                    const ft = fade(t);
+                    out[i] = (a*(1-ft) + b*ft) * 0.9;
+                }
+                return out;
+            };
+
+            // 🎵 Formant Noise：白噪 + 幾個「元音」共鳴調制
+            const makeFormant = (L) => {
+                const out = new Float32Array(L);
+                const base = makeWhite(L);
+                // 簡單 A / O 類 formant 頻率（Hz）
+                const f1 = 300, f2 = 800, f3 = 2500;
+                for (let i = 0; i < L; i++) {
+                    const t = i / sr;
+                    const m =
+                        1.0
+                        + 0.6 * Math.sin(2 * Math.PI * f1 * t)
+                        + 0.4 * Math.sin(2 * Math.PI * f2 * t + 1.3)
+                        + 0.25 * Math.sin(2 * Math.PI * f3 * t + 0.7);
+                    // 約略正常化
+                    out[i] = base[i] * (m * 0.25);
+                }
+                return out;
+            };
+
+            // ⚡ Dust Noise：稀疏 impulsive，像指甲 / 靜電
+            const makeDust = (L) => {
+                const out = new Float32Array(L);
+                let current = 0;
+                const p = 0.004; // 密度（越大越多顆粒）
+                for (let i = 0; i < L; i++) {
+                    if (Math.random() < p) {
+                        // 觸發一顆粒子（帶一點隨機極性）
+                        current += (Math.random() * 2 - 1) * 0.9;
+                    }
+                    current *= 0.96; // 快速衰減
+                    out[i] = current;
+                }
+                return out;
+            };
+
+            // 🪵 Wood Noise：木箱體感，softPink + mid formant
+            const makeWood = (L) => {
+                const base = makeSoftPink(L);
+                const out = new Float32Array(L);
+                const fLow = 220;   // 箱體低共鳴
+                const fMid = 550;   // 木頭中頻
+                for (let i = 0; i < L; i++) {
+                    const t = i / sr;
+                    const tone =
+                        0.5 * Math.sin(2*Math.PI*fLow*t) +
+                        0.35 * Math.sin(2*Math.PI*fMid*t + 1.1);
+                    // noise * (1 + 一點木頭共鳴調制)
+                    out[i] = base[i] * (1.0 + 0.4 * tone);
+                }
+                return out;
+            };
+
+            // === 選擇對應類型 ===
+            switch (type) {
+                case "white":      seed = makeWhite(len); break;
+                case "pink":       seed = makePink(len); break;
+                case "brown":      seed = makeBrown(len); break;
+                case "softBrown":  seed = makeSoftBrown(len); break;
+                case "softPink":   seed = makeSoftPink(len); break;
+                case "red":        seed = makeRed(len); break;
+                case "blue":       seed = makeBlue(len); break;
+                case "violet":     seed = makeViolet(len); break;
+                case "gray":       seed = makeGrey(len); break;
+
+                case "wind":       seed = makeWind(len); break;
+                case "perlin":     seed = makePerlin(len); break;
+                case "formant":    seed = makeFormant(len); break;
+                case "dust":       seed = makeDust(len); break;
+                case "wood":       seed = makeWood(len); break;
+
+                default:           seed = makePink(len); break;
             }
 
         } catch (e) {
-            console.warn("[RC] seed build failed", e);
-            seed = null;
+            console.warn("[RC] seed generation failed, fallback pink", e);
+            // 簡單 fallback
+            const fallbackLen = 2048;
+            seed = new Float32Array(fallbackLen);
+            for (let i = 0; i < fallbackLen; i++) {
+                seed[i] = Math.random()*2 - 1;
+            }
         }
+
+
 
         console.log("[RC] seed check", seed?.length, seed?.[0]);
 
