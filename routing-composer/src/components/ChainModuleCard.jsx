@@ -161,7 +161,7 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam }) {
               onChange={(v) => onParam("ksRelease", v)}
             />
 
-            {/* Seed type - 音樂化 Soft/Warm/Bright/Mix（值不變） */}
+            {/* Seed type - 音樂化 Soft/Warm/Bright/Mix（擴充版） */}
             <div className="flex items-center gap-2">
               <div className="w-24 text-sm opacity-80">Noise</div>
               <select
@@ -169,12 +169,30 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam }) {
                 value={String(params.seedNoiseType ?? "pink")}
                 onChange={(e) => onParam("seedNoiseType", e.target.value)}
               >
-                <option value="brown">Soft</option>   {/* 原 brown */}
-                <option value="pink">Warm</option>    {/* 原 pink */}
-                <option value="white">Bright</option> {/* 原 white */}
-                <option value="grey">Mix</option>     {/* 原 grey */}
+                {/* 你原本的四種 */}
+                <option value="brown">Soft</option>
+                <option value="softBrown">Extra Soft</option>
+                <option value="red">Deep Soft</option>
+
+                <option value="pink">Warm</option>
+                <option value="softPink">Warm Soft</option>
+
+                <option value="white">Bright</option>
+
+                <option value="blue">Airy</option>
+                <option value="violet">Breathy</option>
+
+                <option value="wind">Windy</option>
+                <option value="perlin">Organic</option>
+                <option value="formant">Body</option>
+                <option value="dust">Dusty</option>
+                <option value="wood">Woody</option>
+
+                <option value="grey">Mix</option>
               </select>
             </div>
+
+
 
             {String(params.smoothingMode ?? "auto") === "auto" && (
               <div className="text-[11px] opacity-70">
