@@ -50,6 +50,10 @@ export default AudioPatchbay;
             synth={synth}
             buttonTarget={buttonTarget}
             autoTailwind={tailwind === "auto"}
+
+            showButton={opts.showButton !== false}
+            initialState={opts.initialState}
+            onChange={opts.onChange}
           />
         );
       } else {
@@ -59,8 +63,11 @@ export default AudioPatchbay;
             synth={synth}
             buttonTarget={buttonTarget}
             autoTailwind={tailwind === "auto"}
-          />,
-          host
+
+            showButton={opts.showButton !== false}
+            initialState={opts.initialState}
+            onChange={opts.onChange}
+          />,host
         );
       }
 

@@ -164,7 +164,7 @@ export class AudioEngine {
   // --------------------------------------------------------------------
   // build(chain) — Build a single chain of modules into WebAudio graph
   // --------------------------------------------------------------------
-  build(chain) {
+  build(chain, chainIdx = 0) {
     this.liveNodes.clear();
 
     const createNode = (mod) => {
@@ -283,13 +283,27 @@ export class AudioEngine {
 
     // 把每條 chain 的尾巴接到該 channel 的 mixer
     try {
+        if (!tail) return;
+
+        // 為這條 chain 建一顆 gain（用來做 mute）
+        const chainId = chainIdx | 0;
+        const chainGain = this.actx.createGain();
+        chainGain.gain.value = 1.0;
+        this.liveNodes.set(`chainGain:${chainId}`, chainGain);
+
+        tail.connect(chainGain);
+
         const p = chain.find(m => m.kind === "ks_source" || m.kind === "source");
         const chSel = (p?.params?.ch ?? "all");
-        const channels = (chSel === "all") ? Array.from({ length: 16 }, (_, i) => i) : [Number(chSel)];
+        const channels =
+          (chSel === "all")
+            ? Array.from({ length: 16 }, (_, i) => i)
+            : [Number(chSel)];
+
         for (const ch of channels) {
             const mix = this.mixers[ch];
-            if (tail && mix) {
-            tail.connect(mix);
+            if (mix) {
+              chainGain.connect(mix);
             }
         }
     } catch (e) {
@@ -311,25 +325,55 @@ export class AudioEngine {
     // 把目前還在發聲的 fallback osc voice map（給 gate 的 noteOff 用）先暫存
     const oscVoices = prev.get("__oscVoices__");
 
+    // ✅ 新增：也保留 KS 的 voice map
+    const ksVoices  = prev.get("__ksVoices__");
+
     const merged = new Map();  // 不再從 prev 開始
 
-    for (const chain of chains) {
+    chains.forEach((chain, idx) => {
       const temp = new Map();
       this.liveNodes = temp;
-      this.build(chain);   // 對單一 chain 寫進 temp
+      this.build(chain, idx);   // 傳 chainIdx 進去
 
       for (const [k, v] of temp.entries()) {
-        merged.set(k, v);  // 合併多條 chain 的 node
+        merged.set(k, v);
       }
-    }
+    });
 
     // 把還在發聲的 fallback voices 放回去（可有可無，不留也只是有時候 noteOff 找不到它們而已）
     if (oscVoices) {
       merged.set("__oscVoices__", oscVoices);
     }
 
+    // ✅ 新增：把 KS voices 也放回來
+    if (ksVoices)  merged.set("__ksVoices__", ksVoices);
+
     this.liveNodes = merged;
   }
+
+
+  setChainMute(chainIdx, muted) {
+        try {
+            const key = `chainGain:${chainIdx | 0}`;
+            const g = this.liveNodes && this.liveNodes.get(key);
+            if (!g || !g.gain) {
+            console.warn("[RC] setChainMute: chainGain not found", key);
+            return false;
+            }
+
+            const now = this.actx.currentTime;
+            g.gain.cancelScheduledValues(now);
+            g.gain.setValueAtTime(muted ? 0.0 : 1.0, now);
+
+            console.log("[RC] setChainMute",
+            { chainIdx, key, muted, gain: g.gain.value });
+
+            return true;
+        } catch (e) {
+            console.warn("[RC] setChainMute failed", chainIdx, e);
+            return false;
+        }
+    }
 
 
   // --------------------------------------------------------------------
@@ -381,14 +425,9 @@ export class AudioEngine {
         }
       }
 
-      // 若沒有任何 source 符合，就直接用 __oscType__ + 預設 ADSR 當作 fallback
+      // 若沒有任何 source 符合，就直接不出聲（不再使用預設 fallback OSC）
       if (!sources.length) {
-        const type = this.liveNodes.get("__oscType__") || "sawtooth";
-        sources.push({
-          modId: null,
-          type,
-          adsr: { a: 0.003, d: 0.08, s: 0.4, r: 0.2 },
-        });
+        return;
       }
 
       const tail  = this.liveNodes.get("__chainTail__");
@@ -445,25 +484,25 @@ export class AudioEngine {
           env.connect(inject);
 
           // 確保 tail → mixer[ch] 有接起來
-          try {
-            const mix = this.mixers?.[ch];
-            if (tail && mix) {
-              if (tail.context === this.actx && mix.context === this.actx) {
-                tail.connect(mix);
-              } else {
-                console.warn("[RC] context mismatch detected, re-adopting synth context");
-                this.setMidiSynth(this.midiSynth);
-                try {
-                  const m2 = this.mixers?.[ch];
-                  if (tail.context === this.actx && m2?.context === this.actx) {
-                    tail.connect(m2);
-                  }
-                } catch {}
-              }
-            }
-          } catch (e) {
-            console.warn("[RC] mixer connect failed", e);
-          }
+        //   try {
+        //     const mix = this.mixers?.[ch];
+        //     if (tail && mix) {
+        //       if (tail.context === this.actx && mix.context === this.actx) {
+        //         tail.connect(mix);
+        //       } else {
+        //         console.warn("[RC] context mismatch detected, re-adopting synth context");
+        //         this.setMidiSynth(this.midiSynth);
+        //         try {
+        //           const m2 = this.mixers?.[ch];
+        //           if (tail.context === this.actx && m2?.context === this.actx) {
+        //             tail.connect(m2);
+        //           }
+        //         } catch {}
+        //       }
+        //     }
+        //   } catch (e) {
+        //     console.warn("[RC] mixer connect failed", e);
+        //   }
         }
 
         osc.start(now);
@@ -1038,27 +1077,27 @@ export class AudioEngine {
         try {
             const tailKey = key.replace(":ksOut", ":tail");
             const tail = this.liveNodes.get(tailKey) || this.liveNodes.get("__chainTail__");
-            const chVol = this.midiSynth?.chvol?.[ch];
+            // const chVol = this.midiSynth?.chvol?.[ch];
 
-            try {
-                const mix = this.mixers?.[ch];
-                if (tail && mix) {
-                    if (tail.context === this.actx && mix.context === this.actx) {
-                        tail.connect(mix);
-                    } else {
-                        console.warn('[RC] context mismatch detected, re-adopting synth context');
-                        this.setMidiSynth(this.midiSynth);
-                        try {
-                            const m2 = this.mixers?.[ch];
-                            if (tail.context === this.actx && m2?.context === this.actx) {
-                                tail.connect(m2);
-                            }
-                        } catch {}
-                    }
-                }
-            } catch (e) {
-                console.warn('[RC] mixer connect failed', e);
-            }
+            // try {
+            //     const mix = this.mixers?.[ch];
+            //     if (tail && mix) {
+            //         if (tail.context === this.actx && mix.context === this.actx) {
+            //             tail.connect(mix);
+            //         } else {
+            //             console.warn('[RC] context mismatch detected, re-adopting synth context');
+            //             this.setMidiSynth(this.midiSynth);
+            //             try {
+            //                 const m2 = this.mixers?.[ch];
+            //                 if (tail.context === this.actx && m2?.context === this.actx) {
+            //                     tail.connect(m2);
+            //                 }
+            //             } catch {}
+            //         }
+            //     }
+            // } catch (e) {
+            //     console.warn('[RC] mixer connect failed', e);
+            // }
 
         } catch {}
 

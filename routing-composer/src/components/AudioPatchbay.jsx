@@ -12,7 +12,15 @@ import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom";
 import ChainEditor from "./ChainEditor.jsx";
 
-export default function AudioPatchbay({ synth, buttonTarget, autoTailwind = false }) {
+export default function AudioPatchbay({ 
+  synth,
+  buttonTarget,
+  autoTailwind = false,
+  showButton = true,
+  initialState,
+  onChange,
+
+}) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -83,6 +91,21 @@ export default function AudioPatchbay({ synth, buttonTarget, autoTailwind = fals
     <div>
       <style>{`
         :root { --rc-bg1:#0f1022; --rc-bg2:#2a2b55; --rc-card:rgba(22,22,34,.92); --rc-border:rgba(255,255,255,.1); --rc-text:#f5f7ff; }
+        /* 預設淺色模式 → 深天空藍 */
+        :root {
+          --rc-toggle-text: #38bdf8; /* sky-400 */
+        }
+
+        /* 深色模式 → 淺天空藍 */
+        @media (prefers-color-scheme: dark) {
+          :root {
+            --rc-toggle-text: #7dd3fc; /* sky-300 */
+          }
+        }
+        /* 套到打開 GUI 的按鈕 */
+        .rc-toggle-btn {
+          color: var(--rc-toggle-text) !important;
+        }
         .rc-toggle-btn { padding:10px 14px; border-radius:999px; border:1px solid var(--rc-border); background:rgba(255,255,255,.08); color:var(--rc-text); /*backdrop-filter:blur(8px);*/ box-shadow:0 6px 24px rgba(0,0,0,.35); cursor:pointer; z-index:9999; }
         .rc-toggle-btn:hover { background:rgba(255,255,255,.12); }
         .rc-overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); /*backdrop-filter:blur(2px);*/ display:flex; align-items:center; justify-content:center; z-index:9998; }
@@ -171,14 +194,15 @@ export default function AudioPatchbay({ synth, buttonTarget, autoTailwind = fals
       `}</style>
 
       {/* Prefer mounting the button into a given target; fallback to fixed top-left */}
-      {buttonTarget
-        ? ReactDOM.createPortal(<ButtonPortal />, buttonTarget)
-        : (
-          <div className="rc-fixed-default">
-            <ButtonPortal />
-          </div>
-        )
-      }
+      {showButton && (
+        buttonTarget
+          ? ReactDOM.createPortal(<ButtonPortal />, buttonTarget)
+          : (
+              <div className="rc-fixed-default">
+                <ButtonPortal />
+              </div>
+            )
+      )}
 
       {/* Modal panel */}
       <div
@@ -253,7 +277,11 @@ export default function AudioPatchbay({ synth, buttonTarget, autoTailwind = fals
             </div>
 
           <div className="rc-body">
-            <ChainEditor synth={synth} />
+            <ChainEditor
+              synth={synth}
+              initialState={initialState}
+              onChange={onChange}
+            />
           </div>
         </div>
       </div>

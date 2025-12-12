@@ -7,6 +7,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import ChainModuleCard from "./ChainModuleCard.jsx";
 import { AudioEngine } from "../core/AudioEngine.js";
+import { normalizeRoutingState, normalizeSingleChain } from "../core/routingIO.js";
 
 // Tailwind base styles
 const buttonClass =
@@ -45,7 +46,11 @@ function arrayMove(arr, from, to) {
   return c;
 }
 
-export default function ChainEditor({ synth }) {
+export default function ChainEditor({ 
+  synth,
+  initialState,
+  onChange, 
+}) {
   const engineRef = useRef(null);
   if (!engineRef.current) engineRef.current = new AudioEngine();
   const engine = engineRef.current;
@@ -62,28 +67,203 @@ export default function ChainEditor({ synth }) {
     }
   }, [synth]);
 
-  // 全域 MIDI 入口（供 routingComposer.onNoteOn 呼叫）
-  useEffect(() => {
-    window.__RC_HANDLE__ = {
-        midi: (data) => {
-            try { engine.handleMIDIMsg && engine.handleMIDIMsg(data); console.log('[RC] MIDI -> engine', data); }
-            catch (e) { console.warn('[RC] MIDI ingress failed', e); }
-        },
-        engine // ★ 讓你能在 Console 看到 engine.liveNodes
-    };
-    return () => { try { delete window.__RC_HANDLE__; } catch(_){} };
-  }, [engine]);
-
-  // 狀態：chains
-  const [chains, setChains] = useState([[
+  const makeDefaultChains = () => [[
     { id: uid("ks"), kind: "ks_source", enabled: true, params: { ...DEFAULT_PARAMS.ks_source } },
     { id: uid("gain"), kind: "gain", enabled: true, params: { ...DEFAULT_PARAMS.gain } },
     { id: uid("an"), kind: "analyzer", enabled: true, params: {} },
-  ]]);
+  ]];
+
+  // 狀態：chains（Step 3：支援 initialState）
+  const [chains, setChains] = useState(() => {
+    const c = initialState?.chains;
+    return (Array.isArray(c) && c.length > 0) ? c : makeDefaultChains();
+  });
+
+  // ✅ Step 3：每條 chain 的顯示名稱 / 鎖定狀態
+  const [chainMeta, setChainMeta] = useState(() => {
+    const m = initialState?.chainMeta;
+    return Array.isArray(m) ? m : [];
+  });
+
+  // 每條 chain 的 mute 狀態（用 index 對應）
+  const [chainMutes, setChainMutes] = useState(() => {
+    const m = initialState?.mutes;
+    return Array.isArray(m) ? m : [];
+  });
+
+  
+  const chainMutesRef = useRef(chainMutes);
+  useEffect(() => {
+    chainMutesRef.current = chainMutes;
+  }, [chainMutes]);
+
+  // 當 chains 長度變動時，調整 chainMutes 長度（新 chain 預設不 mute）
+  useEffect(() => {
+    setChainMutes((prev) => {
+      const next = prev.slice(0, chains.length);
+      while (next.length < chains.length) next.push(false);
+      return next;
+    });
+  }, [chains.length]);
+
+  useEffect(() => {
+    setChainMeta((prev) => {
+      const next = (Array.isArray(prev) ? prev : []).slice(0, chains.length);
+      while (next.length < chains.length) next.push({});
+      return next;
+    });
+  }, [chains.length]);
+
+  // ------------------------------
+  // Step 3-2: URL / JSON loaders
+  // ------------------------------
+
+  const loadFromURL = async (url) => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+
+      const normalized = normalizeRoutingState(json);
+      if (!normalized) throw new Error("Invalid routing JSON");
+
+      setChains(normalized.chains);
+      setChainMeta(normalized.chainMeta);
+      setChainMutes(normalized.mutes);
+
+      console.log("[RC] routing loaded from URL:", url);
+    } catch (e) {
+      console.warn("[RC] loadFromURL failed:", e);
+    }
+  };
+
+  async function loadChainFromURL(chainIdx, url) {
+    const idx = chainIdx | 0;
+    if (idx < 0) return;
+    if (isChainLocked(idx)) return;
+
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+
+      const normalized = normalizeSingleChain(json);
+      if (!normalized || !normalized.chain) throw new Error("Invalid chain JSON");
+
+      // 1) chains：確保長度 >= idx+1，再替換
+      setChains((cc) => {
+        const next = Array.isArray(cc) ? cc.slice() : [];
+        while (next.length < idx + 1) next.push([]); // ✅ 自動補空 chain
+        next[idx] = normalized.chain;
+        return next;
+      });
+
+      // 2) meta：確保長度 >= idx+1，再替換
+      setChainMeta((mm) => {
+        const next = Array.isArray(mm) ? mm.slice() : [];
+        while (next.length < idx + 1) next.push({});
+        next[idx] = normalized.meta || {};
+        return next;
+      });
+
+      // 3) mutes：確保長度 >= idx+1，再替換
+      setChainMutes((mm) => {
+        const next = Array.isArray(mm) ? mm.slice() : [];
+        while (next.length < idx + 1) next.push(false);
+        next[idx] = !!normalized.mute;
+        return next;
+      });
+
+      console.log("[RC] chain loaded from URL:", idx, url);
+    } catch (e) {
+      console.warn("[RC] loadChainFromURL failed:", e);
+    }
+  }
+
+
+
+  const toggleChainMute = (idx) => {
+    setChainMutes((prev) => {
+      const next = [...prev];
+      next[idx] = !next[idx];
+      return next;
+    });
+  };
+
+  // 🔒 Step 3：判斷該 chain 是否被鎖定
+  const isChainLocked = (chainIdx) =>
+    chainMeta?.[chainIdx]?.locked === true;
+
+  // 全域 MIDI 入口（供 routingComposer.onNoteOn 呼叫）
+  useEffect(() => {
+    window.__RC_HANDLE__ = {
+      midi: (data) => {
+        try {
+          engine.handleMIDIMsg && engine.handleMIDIMsg(data);
+          console.log("[RC] MIDI -> engine", data);
+        } catch (e) {
+          console.warn("[RC] MIDI ingress failed", e);
+        }
+      },
+
+      engine,
+
+      // Step 3-2 loaders（你已經做好的話就留著）
+      loadFromURL,
+      loadChainFromURL,
+
+      // Step 3: state access
+      getState: () => ({
+        chains,
+        chainMeta,
+        mutes: chainMutes,
+      }),
+
+      // Step 3: meta setters (for lock/name flags)
+      setChainMeta: (idx, patch) => {
+        const i = idx | 0;
+        if (!patch || typeof patch !== "object") return;
+        setChainMeta((mm) =>
+          (Array.isArray(mm) ? mm : []).map((m, k) =>
+            k === i ? { ...(m || {}), ...patch } : m
+          )
+        );
+      },
+
+      // Step 3: mute setter (optional but handy)
+      setChainMute: (idx, muted) => {
+        const i = idx | 0;
+        setChainMutes((prev) =>
+          (Array.isArray(prev) ? prev : []).map((v, k) => (k === i ? !!muted : v))
+        );
+      },
+    };
+
+    return () => {
+      try { delete window.__RC_HANDLE__; } catch (_) {}
+    };
+  }, [
+    engine,
+    chains,
+    chainMeta,
+    chainMutes,
+  ]);
+
+  useEffect(() => {
+    if (!onChange) return;
+    onChange({
+      chains,
+      mutes: chainMutes,
+      chainMeta,
+    });
+  }, [chains, chainMutes, chainMeta, onChange]);
 
   // 刪除確認彈窗
   const [confirmDel, setConfirmDel] = useState({ open: false, idx: null, step: 1 });
-  const requestDeleteChain = (idx) => setConfirmDel({ open: true, idx, step: 1 });
+  const requestDeleteChain = (idx) => {
+    if (isChainLocked(idx)) return;
+    setConfirmDel({ open: true, idx, step: 1 });
+  };
   const cancelDelete = () => setConfirmDel({ open: false, idx: null, step: 1 });
   const proceedDelete = () => setConfirmDel((s) => ({ ...s, step: 2 }));
   const confirmDelete = () => {
@@ -105,12 +285,29 @@ export default function ChainEditor({ synth }) {
   // 改變 chain 後重建音訊路徑
   useEffect(() => {
     try {
-        engine.buildMany(chains);
-        engine.resume && engine.resume();
+      engine.buildMany(chains);
+      engine.resume && engine.resume();
+
+      // 建完圖之後，把目前的 mute 狀態套用一次
+      chainMutesRef.current.forEach((muted, idx) => {
+        if (typeof engine.setChainMute === "function") {
+          engine.setChainMute(idx, muted);
+        }
+      });
     } catch (e) {
-        console.warn('[RC] buildMany failed', e);
+      console.warn("[RC] buildMany failed", e);
     }
-  }, [JSON.stringify(chains)]);
+  }, [engine, JSON.stringify(chains)]);
+
+  // 當 mute state 改變時，即時套用 mute（不用重建 graph）
+  useEffect(() => {
+    chainMutes.forEach((muted, idx) => {
+      if (typeof engine.setChainMute === "function") {
+        engine.setChainMute(idx, muted);
+      }
+    });
+  }, [engine, chainMutes]);
+
 
   // MIDI Access
   useEffect(() => {
@@ -123,7 +320,8 @@ export default function ChainEditor({ synth }) {
   }, []);
 
   // --- 事件操作 ---
-  const onAdd = (chainIdx, kind) =>
+  const onAdd = (chainIdx, kind) => {
+    if (isChainLocked(chainIdx)) return;
     setChains((cc) => {
       const copy = cc.map((c) => [...c]);
       copy[chainIdx] = [
@@ -132,8 +330,10 @@ export default function ChainEditor({ synth }) {
       ];
       return copy;
     });
+  };
 
-  const onToggle = (chainIdx, id) =>
+  const onToggle = (chainIdx, id) => {
+    if (isChainLocked(chainIdx)) return;
     setChains((cc) =>
       cc.map((c, i) =>
         i !== chainIdx
@@ -141,13 +341,18 @@ export default function ChainEditor({ synth }) {
           : c.map((m) => (m.id === id ? { ...m, enabled: !m.enabled } : m))
       )
     );
+  };
 
-  const onRemove = (chainIdx, id) =>
+  const onRemove = (chainIdx, id) => {
+    if (isChainLocked(chainIdx)) return;
     setChains((cc) =>
       cc.map((c, i) => (i !== chainIdx ? c : c.filter((m) => m.id !== id)))
     );
+  };
 
-  const onParam = (chainIdx, id, k, v) =>{
+  const onParam = (chainIdx, id, k, v) => {
+    if (isChainLocked(chainIdx)) return;
+
     // 先即時推到現役 GainNode（避免必須重建）
     if (k === "gain") {
         const ok = engine.updateGainNodeById(id, v);
@@ -172,11 +377,15 @@ export default function ChainEditor({ synth }) {
   // 拖曳排序
   const [drag, setDrag] = useState(null);
   const onDragStartCard = (chainIdx, modIdx) => (e) => {
+    if (isChainLocked(chainIdx)) return;
+
     setDrag({ chain: chainIdx, from: modIdx });
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", `${chainIdx}:${modIdx}`);
   };
   const onDropCard = (chainIdx, modIdx) => (e) => {
+    if (isChainLocked(chainIdx)) return;
+
     e.preventDefault();
     if (!drag || drag.chain !== chainIdx) return;
     setChains((cc) =>
@@ -187,6 +396,8 @@ export default function ChainEditor({ synth }) {
     setDrag(null);
   };
   const onDropToEnd = (chainIdx) => (e) => {
+    if (isChainLocked(chainIdx)) return;
+
     e.preventDefault();
     if (!drag || drag.chain !== chainIdx) return;
     setChains((cc) =>
@@ -205,6 +416,54 @@ export default function ChainEditor({ synth }) {
       copy.splice(idx + 1, 0, cloned);
       return copy;
     });
+
+
+  // 單一 chain 匯出
+  const exportChain = (idx) => {
+    const chain = chains[idx];
+    if (!chain) return;
+    const normalized = chain; // 這裡先直接用現有資料
+
+    const blob = new Blob([JSON.stringify(normalized, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `audio-chain-${idx + 1}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // 單一 chain 匯入（會取代該條線路）
+  const importChain = async (idx, file) => {
+    if (isChainLocked(chainIdx)) return;
+
+    const text = await file.text();
+    try {
+      const arr = JSON.parse(text);
+      if (!Array.isArray(arr)) return;
+
+      // 重新產生 module id，避免與其他 chain 撞 id
+      const normalized = arr.map((m) => ({
+        id: uid(m.kind || "mod"),
+        kind: m.kind || "gain",
+        enabled: m.enabled !== false,
+        params: m.params || {},
+      }));
+
+      setChains((cc) =>
+        cc.map((c, i) => (i === idx ? normalized : c))
+      );
+    } catch (e) {
+      console.warn("[RC] importChain failed", e);
+    }
+  };
+
+  // 新增一條空的 chain（不含任何 module，預設無聲）
+  const addChain = () =>
+    setChains((cc) => [...cc, []]);
+
 
   // 匯出 / 匯入 JSON
   const exportJSON = () => {
@@ -232,18 +491,6 @@ export default function ChainEditor({ synth }) {
       <div className="flex items-center justify-between mb-4">
         
         <div className="flex items-center gap-2 flex-wrap">
-          {MODULES.map((k) => (
-            <button
-              key={`add-${k}`}
-              className={buttonClass}
-              onClick={() => onAdd(0, k)}
-            >
-              + {k}
-            </button>
-          ))}
-          <button className={buttonClass} onClick={() => engine.resume()}>
-            Resume Audio
-          </button>
           <button className={buttonClass} onClick={exportJSON}>
             Export
           </button>
@@ -289,16 +536,74 @@ export default function ChainEditor({ synth }) {
 
       {/* Main chain list */}
       <div className="relative border border-dashed border-white/20 rounded-2xl p-4 overflow-x-auto">
-        {chains.map((chain, chainIdx) => (
-          <div key={chainIdx} className="mb-6">
+        {chains.map((chain, chainIdx) => {
+          const locked = isChainLocked(chainIdx);
+
+          return (
+          <div
+            key={chainIdx}
+            className={`mb-6 rounded-lg p-2
+              ${locked ? "bg-neutral-900/60 border border-yellow-500/40" : ""}`}
+          >
             <div className="flex items-center justify-between mb-2">
-              <div className="text-sm opacity-80">Chain #{chainIdx + 1}</div>
-              <div className="flex gap-2">
-                <button className={buttonClass} onClick={() => duplicateChain(chainIdx)}>
-                  Duplicate chain
+              <div className="text-sm opacity-80">{chainMeta[chainIdx]?.name ?? `Chain #${chainIdx + 1}`}</div>
+              {locked && (
+                <span
+                  className="text-xs px-2 py-0.5 rounded
+                            border border-yellow-400
+                            text-yellow-400
+                            bg-transparent
+                            opacity-100"
+                  title="This chain is locked (GUI editing disabled)"
+                >
+                  🔒 Locked
+                </span>
+              )}
+              <div className="flex gap-2 items-center">
+                {/* 🔊 / 🔇 */}
+                <button
+                  className={buttonClass}
+                  onClick={() => toggleChainMute(chainIdx)}
+                  title={chainMutes[chainIdx] ? "Unmute chain" : "Mute chain"}
+                >
+                  {chainMutes[chainIdx] ? "🔇" : "🔊"}
                 </button>
-                <button className={buttonClass} onClick={() => requestDeleteChain(chainIdx)}>
-                  Delete chain
+
+                {/* 單一 chain 匯出 */}
+                <button
+                  className={buttonClass}
+                  onClick={() => exportChain(chainIdx)}
+                >
+                  Export
+                </button>
+
+                {/* 單一 chain 匯入（取代這條） */}
+                <label className={`${buttonClass} cursor-pointer`}>
+                  Import
+                  <input
+                    type="file"
+                    accept="application/json"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) importChain(chainIdx, f);
+                      e.target.value = "";
+                    }}
+                  />
+                </label>
+
+                {/* 保留原本的 Duplicate / Delete */}
+                <button
+                  className={buttonClass}
+                  onClick={() => duplicateChain(chainIdx)}
+                >
+                  Duplicate
+                </button>
+                <button
+                  className={buttonClass}
+                  onClick={() => requestDeleteChain(chainIdx)}
+                >
+                  Delete
                 </button>
               </div>
             </div>
@@ -307,8 +612,6 @@ export default function ChainEditor({ synth }) {
               {chain.map((mod, modIdx) => (
                 <div
                   key={mod.id}
-                  draggable
-                  onDragStart={onDragStartCard(chainIdx, modIdx)}
                   onDrop={onDropCard(chainIdx, modIdx)}
                   onDragOver={(e) => e.preventDefault()}
                   className="hover:border-white/20 transition border border-transparent rounded-2xl"
@@ -319,6 +622,7 @@ export default function ChainEditor({ synth }) {
                     onToggle={() => onToggle(chainIdx, mod.id)}
                     onRemove={() => onRemove(chainIdx, mod.id)}
                     onParam={(k, v) => onParam(chainIdx, mod.id, k, v)}
+                    onDragStart={onDragStartCard(chainIdx, modIdx)}
                   />
                 </div>
               ))}
@@ -343,7 +647,14 @@ export default function ChainEditor({ synth }) {
               ))}
             </div>
           </div>
-        ))}
+        )})}
+
+        {/* 新增線路按鈕：加在所有 chain 的最底下 */}
+        <div className="mt-2 flex justify-center">
+          <button className={buttonClass} onClick={addChain}>
+            + Add chain
+          </button>
+        </div>
       </div>
 
       {/* 刪除確認彈窗 */}

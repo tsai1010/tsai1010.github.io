@@ -38,6 +38,8 @@ function ParamSlider({ label, min, max, step = 0.01, value, onChange, suffix }) 
         step={step}
         value={Number(value ?? 0)}
         onChange={(e) => onChange(Number(e.target.value))}
+        onMouseUp={(e) => e.currentTarget.blur()}
+        onTouchEnd={(e) => e.currentTarget.blur()}
         style={{ "--rc-pos": `${pos}%` }}
       />
       <div className="w-20 tabular-nums text-right text-xs opacity-70">
@@ -48,14 +50,25 @@ function ParamSlider({ label, min, max, step = 0.01, value, onChange, suffix }) 
   );
 }
 
-export default function ChainModuleCard({ mod, onToggle, onRemove, onParam }) {
+export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDragStart }) {
   const { kind, enabled, params = {} } = mod;
 
   return (
     <div className={`${cardClass} w-[280px]`}>
       {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="font-semibold capitalize">{kind}</div>
+        <div className="flex items-center gap-2">
+          {/* 拖動把手：只有這顆可以啟動拖曳 */}
+          <div
+            className="cursor-grab active:cursor-grabbing text-xs opacity-60 select-none"
+            draggable={!!onDragStart}
+            onDragStart={onDragStart}
+            title="Drag to reorder"
+          >
+            ☰
+          </div>
+          <div className="font-semibold capitalize">{kind}</div>
+        </div>
         <div className="flex gap-2">
           <button className={buttonClass} onClick={onToggle}>
             {enabled ? "Bypass" : "Enable"}
@@ -78,7 +91,10 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam }) {
               <select
                 className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
                 value={String(params.ch ?? "all")}
-                onChange={(e) => onParam("ch", e.target.value)}
+                onChange={(e) => {
+                  onParam("ch", e.target.value);
+                  e.target.blur();
+                }}
               >
                 <option value="all">all</option>
                 {Array.from({ length: 16 }, (_, i) => (
@@ -95,7 +111,10 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam }) {
               <select
                 className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
                 value={String(params.program ?? "all")}
-                onChange={(e) => onParam("program", e.target.value)}
+                onChange={(e) => {
+                  onParam("program", e.target.value);
+                  e.target.blur();
+                }}
               >
                 <option value="all">all</option>
                 {Array.from({ length: 128 }, (_, i) => (
@@ -112,7 +131,10 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam }) {
               <select
                 className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
                 value={String(params.smoothingMode ?? "auto")}
-                onChange={(e) => onParam("smoothingMode", e.target.value)}
+                onChange={(e) => {
+                  onParam("smoothingMode", e.target.value);
+                  e.target.blur();
+                }}
               >
                 {["auto", "manual"].map((t) => (
                   <option key={t} value={t}>{t}</option>
@@ -167,7 +189,10 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam }) {
               <select
                 className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
                 value={String(params.seedNoiseType ?? "pink")}
-                onChange={(e) => onParam("seedNoiseType", e.target.value)}
+                onChange={(e) => {
+                  onParam("seedNoiseType", e.target.value);
+                  e.target.blur();
+                }}
               >
                 {/* 你原本的四種 */}
                 <option value="brown">Soft</option>
@@ -211,7 +236,10 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam }) {
                 <select
                     className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
                     value={String(mod.params.ch ?? "all")}
-                    onChange={(e) => onParam("ch", e.target.value)}
+                    onChange={(e) => {
+                      onParam("ch", e.target.value);
+                      e.target.blur();
+                    }}
                 >
                     <option value="all">all</option>
                     {Array.from({ length: 16 }, (_, i) => (
@@ -225,7 +253,10 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam }) {
                 <select
                     className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
                     value={String(mod.params.type)}
-                    onChange={(e) => onParam("type", e.target.value)}
+                    onChange={(e) => {
+                      onParam("type", e.target.value);
+                      e.target.blur();
+                    }}
                 >
                     {["sine", "square", "sawtooth", "triangle"].map((t) => (
                     <option key={t} value={t}>{t}</option>
@@ -257,7 +288,10 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam }) {
               <select
                 className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
                 value={String(params.mode ?? "lowpass")}
-                onChange={(e) => onParam("mode", e.target.value)}
+                onChange={(e) => {
+                  onParam("mode", e.target.value);
+                  e.target.blur();
+                }}
               >
                 {["lowpass", "highpass", "bandpass", "notch"].map((t) => (
                   <option key={t} value={t}>
@@ -338,7 +372,10 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam }) {
               <select
                 className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
                 value={String(params.irId ?? "IR_Gibson")}
-                onChange={(e) => onParam("irId", e.target.value)}
+                onChange={(e) => {
+                  onParam("irId", e.target.value);
+                  e.target.blur();
+                }}
               >
                 {/* 這裡先列出已知 key；若你有 registry，可改成動態 */}
                 {["IR_Gibson", "IR_piezo"].map((id) => (
