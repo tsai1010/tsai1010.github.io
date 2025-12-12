@@ -1,0 +1,47 @@
+[
+  [
+    {
+      "id": "ks_5hlzeo2",
+      "kind": "ks_source",
+      "enabled": true,
+      "params": {
+        "smoothingMode": "manual",
+        "smoothingFactor": 0.81,
+        "velScale": 0.73,
+        "seedNoiseType": "pink",
+        "useSynthA4": true,
+        "ch": "all",
+        "program": "all",
+        "ksDurSec": 6.3
+      }
+    },
+    {
+      "id": "filter_3efz927",
+      "kind": "filter",
+      "enabled": true,
+      "params": {
+        "mode": "lowpass",
+        "freq": 4760.91,
+        "q": 0.7
+      }
+    },
+    {
+      "id": "delay_62rh8v0",
+      "kind": "delay",
+      "enabled": true,
+      "params": {
+        "time": 0.25,
+        "feedback": 0.35,
+        "mix": 0.3
+      }
+    },
+    {
+      "id": "gain_emue69y",
+      "kind": "gain",
+      "enabled": true,
+      "params": {
+        "gain": 0.64
+      }
+    }
+  ]
+]
