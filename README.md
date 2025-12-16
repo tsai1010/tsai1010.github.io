@@ -17,6 +17,10 @@ The following example shows how to initialize the synth only after the first use
 and how to attach the GUI panel to an existing element using `enableRoutingComposer()` (available only in the GUI version).
 
 ```js
+let ctx;
+let ctxStart = false;
+let midi_synth;
+
 async function initAudio() {
   if (!ctxStart) {
     // ⚡ Create AudioContext only after first user interaction
