@@ -33,8 +33,8 @@ async function initAudio() {
         tailwind: 'auto',
         loadChains: [
           { idx: 0, url: "/presets/audio-chain-1.json", name: "Main KS", locked: true },
-          { idx: 1, url: "/presets/audio-chain-2.json", name: "test 1", locked: true },
-          { idx: 2, url: "/presets/audio-chain-2.json", name: "test 2", locked: true },
+          { idx: 1, url: "/presets/audio-chain-2.json", name: "Preset Locked Example", locked: true },
+          { idx: 2, url: "/presets/audio-chain-2.json", name: "Preset Unlocked Example", locked: false },
         ],
       });
     } else {
@@ -760,4 +760,5 @@ function oscCreate(freq, velocityAmount, decay_time, filter, ff, width=10){
     feedback.gain.linearRampToValueAtTime(0, currentTime + width/1000);
 
     return osc;
+
 }
