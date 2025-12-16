@@ -1231,14 +1231,18 @@ class MidiSynth {
         const mod = await import(uiUrl);
        
 
-        async function waitForMidiHandle(timeout = 5000) {
+        async function waitForHandle(timeout = 5000, need = {}) {
             const start = performance.now();
             while (performance.now() - start < timeout) {
-                if (window.__RC_HANDLE__ && typeof window.__RC_HANDLE__.midi === 'function') return true;
+                const h = window.__RC_HANDLE__;
+                const okMidi = !need.midi || (h && typeof h.midi === "function");
+                const okLoad = !need.loadFromURL || (h && typeof h.loadFromURL === "function");
+                if (okMidi && okLoad) return true;
                 await new Promise(r => setTimeout(r, 50));
             }
             return false;
         }
+
 
         // 4) 取得掛載方法：優先用模組匯出，其次用全域 RoutingComposer.mount
         const mount = mod.mountRoutingComposer || (window.RoutingComposer && window.RoutingComposer.mount);
@@ -1252,13 +1256,97 @@ class MidiSynth {
             synth: this,
             button: options.button,
             tailwind: options.tailwind ?? "auto",
+
+            // ✅ Step 3: 新增（GUI 端會用到）
+            showButton: options.showButton,
+            initialState: options.initialState,
+            onChange: options.onChange,
         });
 
         // ❶ 關鍵：等 GUI 把全域入口綁好
-        const ready = await waitForMidiHandle();
+        const ready = await waitForHandle(5000, {
+            midi: true,
+            loadFromURL: !!options.loadURL,
+        });
         if (!ready) console.warn('[RC] __RC_HANDLE__.midi still not ready after wait');
 
         this.routingUI = { host };
+
+        // ------------------------------
+        // Step 3: Apply presets (loadURL / loadChains with flags)
+        // ------------------------------
+
+        const handle = window.__RC_HANDLE__;
+
+        // normalize loadURL (string | object)
+        const loadURLObj =
+        (typeof options.loadURL === "string")
+            ? { url: options.loadURL }
+            : (options.loadURL && typeof options.loadURL === "object")
+            ? options.loadURL
+            : null;
+
+        // (A) load full routing
+        if (loadURLObj?.url && handle?.loadFromURL) {
+            try {
+                await handle.loadFromURL(loadURLObj.url);
+                console.log("[RC] preset loaded:", loadURLObj.url);
+
+                // apply names[] (optional)
+                if (Array.isArray(loadURLObj.names) && handle?.setChainMeta) {
+                loadURLObj.names.forEach((name, idx) => {
+                    if (typeof name === "string") handle.setChainMeta(idx, { name });
+                });
+                }
+
+                // apply locked (optional): boolean | boolean[]
+                if (loadURLObj.locked != null && handle?.setChainMeta) {
+                if (typeof loadURLObj.locked === "boolean") {
+                    const st = handle.getState?.();
+                    const n = st?.chains?.length ?? 0;
+                    for (let i = 0; i < n; i++) {
+                    handle.setChainMeta(i, { locked: loadURLObj.locked });
+                    }
+                } else if (Array.isArray(loadURLObj.locked)) {
+                    loadURLObj.locked.forEach((locked, idx) => {
+                    if (locked) handle.setChainMeta(idx, { locked: true });
+                    });
+                }
+                }
+            } catch (e) {
+                console.warn("[RC] loadURL failed", e);
+            }
+        }
+
+        // (B) load single chains (optional)
+        if (Array.isArray(options.loadChains) && handle?.loadChainFromURL) {
+            for (const item of options.loadChains) {
+                if (!item || typeof item.url !== "string") continue;
+                const idx = item.idx | 0;
+
+                try {
+                await handle.loadChainFromURL(idx, item.url);
+
+                // apply per-chain flags (locked/name/mute)
+                if (handle?.setChainMeta) {
+                    const patch = {};
+                    if (typeof item.name === "string") patch.name = item.name;
+                    if (item.locked === true) patch.locked = true;
+                    if (Object.keys(patch).length) handle.setChainMeta(idx, patch);
+                }
+
+                if (item.mute != null && handle?.setChainMute) {
+                    handle.setChainMute(idx, !!item.mute);
+                }
+
+                console.log("[RC] chain loaded:", idx, item.url);
+                } catch (e) {
+                console.warn("[RC] loadChains item failed", idx, item.url, e);
+                }
+            }
+        }
+
+
 
         // 6) 建立路由 API：將 noteOn/off 轉成 MIDI bytes 丟進 GUI 的 __RC_HANDLE__
         this.routingComposer = {
