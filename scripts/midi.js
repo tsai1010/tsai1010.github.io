@@ -31,6 +31,11 @@ async function initAudio() {
       await midi_synth.enableRoutingComposer({
         button: '#composer-slot',
         tailwind: 'auto',
+        loadChains: [
+          { idx: 0, url: "/presets/audio-chain-1.json", name: "Main KS", locked: true },
+          { idx: 1, url: "/presets/audio-chain-2.json", name: "test 1", locked: true },
+          { idx: 2, url: "/presets/audio-chain-2.json", name: "test 2", locked: true },
+        ],
       });
     } else {
       console.log("這是非 GUI 版本的 MidiSynth，略過 Routing Composer 初始化。");
