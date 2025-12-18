@@ -32,7 +32,7 @@ async function initAudio() {
         button: '#composer-slot',
         tailwind: 'auto',
         loadChains: [
-          { idx: 0, url: "/presets/audio-chain-1.json", name: "Main KS", locked: true },
+          { idx: 0, url: "/presets/audio-chain-1.json", name: "Main KS"},
           { idx: 1, url: "/presets/audio-chain-2.json", name: "Preset Example – Locked", locked: true },
           { idx: 2, url: "/presets/audio-chain-2.json", name: "Preset Example – Muted", mute: true },
         ],
@@ -760,5 +760,4 @@ function oscCreate(freq, velocityAmount, decay_time, filter, ff, width=10){
     feedback.gain.linearRampToValueAtTime(0, currentTime + width/1000);
 
     return osc;
-
 }

@@ -114,19 +114,21 @@ function MidiSynthCore(target){
             return noiseArray;
         },
         createReverb: async () => {
-            // this.convolver = this.actx.createConvolver();
-
             try {
-                const response = await fetch("data:audio/wav;base64," + IRs.IR_Gibson);
-                const arraybuffer = await response.arrayBuffer();
-                this.audioBuffer = await this.actx.decodeAudioData(arraybuffer);
-                // this.convolver.buffer = audioBuffer;
-            }catch (error) {
-                console.error("Error loading reverb impulse:", error);
+                const out = {};
+                for (const [id, b64] of Object.entries(IRs)) {
+                const resp = await fetch("data:audio/wav;base64," + b64);
+                const ab = await resp.arrayBuffer();
+                out[id] = await this.actx.decodeAudioData(ab);
+                }
+                return out;
+            } catch (err) {
+                console.error("Error loading IRs:", err);
+                return null;
             }
-
-            // return convolver;
         },
+
+
         makeLimiterCurve:() => {
             const samples = 44100;
             const curve = new Float32Array(samples);
@@ -249,11 +251,13 @@ function MidiSynthCore(target){
             this.oscSet=[]; this.bfSet=[]; this.asmWrapper=[]; this.options=[]; this.seedNoise=[];
 
             this.inv127 = 1 / 127;
+            this.inv1272 = this.inv127 * this.inv127;
+            this.cleanPost = 1; // 1 = 乾淨直出；0 = 舊吉他後級
 
             for(let i=0;i<16;++i){
                 let k=[];
                 let j=[];
-                this.vol[i]=3*100*100/(127*127);
+                this.vol[i]=100*this.inv127;
                 this.bend[i]=0; this.brange[i]=0x100;
                 this.pg[i]=0;
                 this.rhythm[i]=0;
@@ -645,7 +649,7 @@ function MidiSynthCore(target){
             this.chmod[channel].gain.setValueAtTime(v*100/127,this._tsConv(t));
         },
         setChVol:(channel,v,t)=>{
-            this.vol[channel]=3*v*v/(127*127);
+            this.vol[channel]=v*this.inv127;
             this.chvol[channel].gain.setValueAtTime(this.vol[channel]*this.ex[channel],this._tsConv(t));
         },
         setPan:(ch,v,t)=>{
@@ -653,7 +657,7 @@ function MidiSynthCore(target){
                 this.chpan[ch].pan.setValueAtTime((v-64)/64,this._tsConv(t));
         },
         setExpression:(ch,v,t)=>{
-            this.ex[ch]=v*v/(127*127);
+            this.ex[ch]=v*this.inv127;
             this.chvol[ch].gain.setValueAtTime(this.vol[ch]*this.ex[ch],this._tsConv(t));
         },
         setPedal:(ch, v) => {
@@ -670,6 +674,9 @@ function MidiSynthCore(target){
             if (wasOn && !nowOn) {
                 if (this.audioEngine && typeof this.audioEngine.releaseSustainKSForChannel === "function") {
                     this.audioEngine.releaseSustainKSForChannel(ch);
+                }
+                if (this.audioEngine && typeof this.audioEngine.releaseAllSustainedOsc === "function") {
+                    this.audioEngine.releaseAllSustainedOsc(ch);
                 }
             }
         },
@@ -771,7 +778,7 @@ function MidiSynthCore(target){
             this.pg[ch]=v;
         },
         setChannelAfterTouch:(channel,v,t)=>{
-            this.vol[channel]=3*v*v/(127*127);
+            this.vol[channel]=v*this.inv127;
             this.chvol[channel].gain.exponentialRampToValueAtTime(this.vol[channel]*this.ex[channel],this._tsConv(t));
         },
         noteOff:(ch, n, t)=>{
@@ -1016,17 +1023,17 @@ function MidiSynthCore(target){
 
             this.revg.gain.setValueAtTime(0.09, this.actx.currentTime); // 0.09
             this.outg.gain.setValueAtTime(0.15, this.actx.currentTime); // 0.15
-            (async () => {
-                await this.createReverb(); // ✅ 確保等到 ConvolverNode 回來
-                if (!this.audioBuffer) {
-                    console.error("Reverb node is null");
-                    return;
-                }
-
+            // (async () => {
+            //     await this.createReverb(); // ✅ 確保等到 ConvolverNode 回來
+            //     if (!this.audioBuffer) {
+            //         console.error("Reverb node is null");
+            //         return;
+            //     }
                 
-                // this.out.connect(this.convolver);
-                // this.convolver.connect(this.revg);
-            })();
+            //     // this.out.connect(this.convolver);
+            //     // this.convolver.connect(this.revg);
+            // })();
+
 
             // this.out.connect(this.revb);
             // this.revb.connect(this.comp);
@@ -1043,7 +1050,7 @@ function MidiSynthCore(target){
             for(let i=0;i<16;++i){
                 this.chvol[i]=this.actx.createGain();
                 this.conv[i]=this.actx.createConvolver();
-                this.conv[i].buffer=this.audioBuffer;
+                // this.conv[i].buffer=this.audioBuffer;
 
                 this.revDelay[i]=this.actx.createDelay();
                 this.revDelay[i].delayTime.setValueAtTime(0.01, this.actx.currentTime);
@@ -1114,17 +1121,29 @@ function MidiSynthCore(target){
                 if(this.actx.createStereoPanner){
                     this.chpan[i]=this.actx.createStereoPanner();
                     this.chvol[i].connect(this.chpan[i]);
-                    this.chpan[i].connect(this.preGain[i]);
+                    
 
-                    this.chpan[i].connect(this.oldGain[i]).connect(this.postShaperGain[i]);
+                    if(this.cleanPost){
+                        this.chpan[i].connect(this.out);
+                    }
+                    else{
+                        this.chpan[i].connect(this.preGain[i]);
+                        this.chpan[i].connect(this.oldGain[i]).connect(this.postShaperGain[i]);
+                    }
                     
                     // this.chpan[i].connect(this.shap[i]).connect(this.conv[i]).connect(this.revg);
                 }
                 else{
                     this.chpan[i]=null;
-                    this.chvol[i].connect(this.preGain[i]);
 
-                    this.chvol[i].connect(this.oldGain[i]).connect(this.postShaperGain[i]);
+                    if(this.cleanPost){
+                        this.chvol[i].connect(this.out);
+                    }
+                    else{
+                        this.chvol[i].connect(this.preGain[i]);
+                        this.chvol[i].connect(this.oldGain[i]).connect(this.postShaperGain[i]);
+                    }
+                    
                     // this.chvol[i].connect(this.shap[i]).connect(this.conv[i]).connect(this.revg);
                 }
 
@@ -1243,6 +1262,8 @@ class MidiSynth {
             return false;
         }
 
+        this.audioEngine = window.__RC_HANDLE__?.engine;
+
 
         // 4) 取得掛載方法：優先用模組匯出，其次用全域 RoutingComposer.mount
         const mount = mod.mountRoutingComposer || (window.RoutingComposer && window.RoutingComposer.mount);
@@ -1277,6 +1298,16 @@ class MidiSynth {
         // ------------------------------
 
         const handle = window.__RC_HANDLE__;
+
+        const irDecoded = await this.createReverb();
+        if (irDecoded && handle?.engine?.setIRBuffer) {
+            for (const [id, buf] of Object.entries(irDecoded)) {
+                handle.engine.setIRBuffer(id, buf);
+            }
+            console.log("[RC][IR] registered to engine:", Object.keys(irDecoded));
+        } else {
+            console.warn("[RC][IR] cannot register (no decoded IR or no handle.engine.setIRBuffer)");
+        }
 
         // normalize loadURL (string | object)
         const loadURLObj =
@@ -1325,23 +1356,23 @@ class MidiSynth {
                 const idx = item.idx | 0;
 
                 try {
-                await handle.loadChainFromURL(idx, item.url);
+                    await handle.loadChainFromURL(idx, item.url, { force: true });
 
-                // apply per-chain flags (locked/name/mute)
-                if (handle?.setChainMeta) {
-                    const patch = {};
-                    if (typeof item.name === "string") patch.name = item.name;
-                    if (item.locked === true) patch.locked = true;
-                    if (Object.keys(patch).length) handle.setChainMeta(idx, patch);
-                }
+                    // apply per-chain flags (locked/name/mute)
+                    if (handle?.setChainMeta) {
+                        const patch = {};
+                        if (typeof item.name === "string") patch.name = item.name;
+                        if (item.locked === true) patch.locked = true;
+                        if (Object.keys(patch).length) handle.setChainMeta(idx, patch);
+                    }
 
-                if (item.mute != null && handle?.setChainMute) {
-                    handle.setChainMute(idx, !!item.mute);
-                }
+                    if (item.mute != null && handle?.setChainMute) {
+                        handle.setChainMute(idx, !!item.mute);
+                    }
 
-                console.log("[RC] chain loaded:", idx, item.url);
+                    console.log("[RC] chain loaded:", idx, item.url);
                 } catch (e) {
-                console.warn("[RC] loadChains item failed", idx, item.url, e);
+                    console.warn("[RC] loadChains item failed", idx, item.url, e);
                 }
             }
         }
