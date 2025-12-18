@@ -1,45 +1,42 @@
 [
   {
-    "id": "ks_5hlzeo2",
+    "id": "ks_tqb5z3m",
     "kind": "ks_source",
     "enabled": true,
     "params": {
-      "smoothingMode": "manual",
-      "smoothingFactor": 0.81,
-      "velScale": 0.73,
+      "smoothingMode": "auto",
+      "smoothingFactor": 0.2,
+      "velScale": 1,
       "seedNoiseType": "pink",
       "useSynthA4": true,
       "ch": "all",
       "program": "all",
-      "ksDurSec": 6.3
+      "ksDurSec": 1.2
     }
   },
   {
-    "id": "filter_3efz927",
-    "kind": "filter",
+    "id": "gain_nf8zg6s",
+    "kind": "gain",
     "enabled": true,
     "params": {
-      "mode": "lowpass",
-      "freq": 4760.91,
-      "q": 0.7
+      "gain": 0.35
     }
   },
   {
-    "id": "delay_62rh8v0",
-    "kind": "delay",
+    "id": "convolver_ir_46stiuo",
+    "kind": "convolver_ir",
     "enabled": true,
     "params": {
-      "time": 0.25,
-      "feedback": 0.35,
+      "irId": "IR_Gibson",
       "mix": 0.3
     }
   },
   {
-    "id": "gain_emue69y",
+    "id": "gain_tcodwnk",
     "kind": "gain",
     "enabled": true,
     "params": {
-      "gain": 0.64
+      "gain": 0.3
     }
   }
 ]
