@@ -137,17 +137,17 @@ export default function ChainEditor({
     }
   };
 
-  async function loadChainFromURL(chainIdx, url) {
+  async function loadChainFromURL(chainIdx, url, opts = {}) {
     const idx = chainIdx | 0;
     if (idx < 0) return;
-    if (isChainLocked(idx)) return;
+    if (!opts.force && isChainLocked(idx)) return;
 
     try {
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
 
-      const normalized = normalizeSingleChain(json);
+      const normalized = normalizeSingleChain(json, { idPrefix: `c${idx}_` });
       if (!normalized || !normalized.chain) throw new Error("Invalid chain JSON");
 
       // 1) chains：確保長度 >= idx+1，再替換

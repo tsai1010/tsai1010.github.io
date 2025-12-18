@@ -264,6 +264,16 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
                 </select>
             </div>
 
+            {/* Level */}
+            <ParamSlider
+              label="level"
+              min={0}
+              max={1}
+              step={0.01}
+              value={Number(mod.params.level ?? 0.15)}
+              onChange={(v) => onParam("level", v)}
+            />
+
             {/* ADSR */}
             <ParamSlider label="attack"  min={0} max={0.2}
                 value={Number(mod.params.adsr?.a ?? 0.003)}

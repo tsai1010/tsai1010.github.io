@@ -9,18 +9,24 @@ function isModule(obj) {
   return obj && typeof obj === "object" && typeof obj.kind === "string";
 }
 
-function normalizeChain(chain) {
+function normalizeChain(chain, opts = {}) {
+  const idPrefix = opts.idPrefix || "";
+
   if (!Array.isArray(chain)) return null;
 
   return chain
     .filter(isModule)
-    .map((m) => ({
-      id: m.id || `${m.kind}_${Math.random().toString(36).slice(2, 9)}`,
-      kind: m.kind,
-      enabled: m.enabled !== false,
-      params: typeof m.params === "object" && m.params ? { ...m.params } : {},
-    }));
+    .map((m) => {
+      const baseId = m.id || `${m.kind}_${Math.random().toString(36).slice(2, 9)}`;
+      return {
+        id: idPrefix ? `${idPrefix}${baseId}` : baseId,
+        kind: m.kind,
+        enabled: m.enabled !== false,
+        params: typeof m.params === "object" && m.params ? { ...m.params } : {},
+      };
+    });
 }
+
 
 /**
  * Normalize full routing JSON
@@ -33,7 +39,10 @@ export function normalizeRoutingState(json) {
 
   // case: direct chains array
   if (Array.isArray(json) && Array.isArray(json[0])) {
-    const chains = json.map(normalizeChain).filter(Boolean);
+    const chains = json
+      .map((chain, idx) => normalizeChain(chain, { idPrefix: `c${idx}_` }))
+      .filter(Boolean);
+
     return {
       version: 1,
       chains,
@@ -46,7 +55,9 @@ export function normalizeRoutingState(json) {
   const chainsRaw = json.chains;
   if (!Array.isArray(chainsRaw)) return null;
 
-  const chains = chainsRaw.map(normalizeChain).filter(Boolean);
+  const chains = chainsRaw
+    .map((chain, idx) => normalizeChain(chain, { idPrefix: `c${idx}_` }))
+    .filter(Boolean);
 
   const chainMeta = Array.isArray(json.chainMeta)
     ? json.chainMeta.slice(0, chains.length)
@@ -68,30 +79,38 @@ export function normalizeRoutingState(json) {
   };
 }
 
+
 /**
  * Normalize single-chain JSON
  * Accepts:
  *  - { chain, meta?, mute? }
  *  - or directly Array<Module>
  */
-export function normalizeSingleChain(json) {
-  if (!json) return null;
+export function normalizeSingleChain(json, opts = {}) {
+  const idPrefix = opts.idPrefix || "";
 
+  const normalizeMods = (arr) =>
+    (Array.isArray(arr) ? arr : []).map((m, i) => {
+      const baseId = m.id || `${m.kind}_${i}_${Math.random().toString(36).slice(2, 8)}`;
+      return {
+        ...m,
+        id: idPrefix ? `${idPrefix}${baseId}` : baseId,
+        enabled: m.enabled !== false,
+        params: m.params || {},
+      };
+    });
+
+  // json 可以是 array 或 {chain, meta, mute}
   if (Array.isArray(json)) {
-    return {
-      chain: normalizeChain(json),
-      meta: {},
-      mute: false,
-    };
+    return { chain: normalizeMods(json), meta: {}, mute: false };
   }
-
-  if (Array.isArray(json.chain)) {
+  if (json && Array.isArray(json.chain)) {
     return {
-      chain: normalizeChain(json.chain),
-      meta: typeof json.meta === "object" && json.meta ? json.meta : {},
+      chain: normalizeMods(json.chain),
+      meta: json.meta || {},
       mute: !!json.mute,
     };
   }
-
   return null;
 }
+
