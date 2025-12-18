@@ -1,31 +1,32 @@
 [
   {
-    "id": "ks_source_8wnsj57",
+    "id": "c2_c2_ks_source_8wnsj57",
     "kind": "ks_source",
     "enabled": true,
     "params": {
       "smoothingMode": "manual",
       "smoothingFactor": 0.81,
-      "velScale": 0.73,
-      "seedNoiseType": "pink",
+      "velScale": 0.77,
+      "seedNoiseType": "perlin",
       "useSynthA4": true,
       "ch": "all",
       "program": "all",
-      "ksDurSec": 6.3
+      "ksDurSec": 6.3,
+      "ksRelease": 0.44
     }
   },
   {
-    "id": "filter_yq616jx",
+    "id": "c2_c2_filter_yq616jx",
     "kind": "filter",
     "enabled": true,
     "params": {
       "mode": "lowpass",
-      "freq": 4760.91,
-      "q": 0.7
+      "freq": 4301.89,
+      "q": 0.73
     }
   },
   {
-    "id": "delay_xec5ipn",
+    "id": "c2_c2_delay_xec5ipn",
     "kind": "delay",
     "enabled": true,
     "params": {
@@ -35,7 +36,16 @@
     }
   },
   {
-    "id": "gain_0q1x3ug",
+    "id": "convolver_ir_yutkuy4",
+    "kind": "convolver_ir",
+    "enabled": true,
+    "params": {
+      "irId": "IR_Gibson",
+      "mix": 0.78
+    }
+  },
+  {
+    "id": "c2_c2_gain_0q1x3ug",
     "kind": "gain",
     "enabled": true,
     "params": {
