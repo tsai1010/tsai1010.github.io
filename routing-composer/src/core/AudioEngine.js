@@ -659,360 +659,330 @@ export class AudioEngine {
   // --------------------------------------------------------------------
 
   pluckKS(ch, note, velocity) {
-        const allKs = Array.from(this.liveNodes.entries()).filter(([k]) => k.endsWith(":ksOut"));
-        if (!allKs.length) return false;
+    const allKs = Array.from(this.liveNodes.entries()).filter(([k]) => k.endsWith(":ksOut"));
+    if (!allKs.length) return false;
 
-        const curPg = Number(this.midiSynth && this.midiSynth.pg ? this.midiSynth.pg[ch] : 0);
+    const curPg = Number(this.midiSynth && this.midiSynth.pg ? this.midiSynth.pg[ch] : 0);
 
-        // ✅ 收集所有「符合 ch/pg 且未 mute」的 ks_source
-        const matches = [];
-        for (const [k, outNode] of allKs) {
-            const modId = k.replace(":ksOut", "");
-            const p = this.liveNodes.get(modId + ":ksParams") || {};
+    // ✅ 收集所有「符合 ch/pg 且未 mute」的 ks_source
+    const matches = [];
+    for (const [k, outNode] of allKs) {
+        const modId = k.replace(":ksOut", "");
+        const p = this.liveNodes.get(modId + ":ksParams") || {};
 
-            // ch match
-            const mch = p.ch != null ? String(p.ch) : "all";
-            const chMatch = (mch === "all") || (Number(mch) === ch);
+        // ch match
+        const mch = p.ch != null ? String(p.ch) : "all";
+        const chMatch = (mch === "all") || (Number(mch) === ch);
 
-            // program match
-            let progParam = p.program;
-            if (progParam === undefined || progParam === null || progParam === "all") progParam = "all";
-            const prog = progParam === "all" ? null : Number(progParam);
-            const pgMatch = (prog === null) || (prog === curPg);
+        // program match
+        let progParam = p.program;
+        if (progParam === undefined || progParam === null || progParam === "all") progParam = "all";
+        const prog = progParam === "all" ? null : Number(progParam);
+        const pgMatch = (prog === null) || (prog === curPg);
 
-            if (!(chMatch && pgMatch)) continue;
+        if (!(chMatch && pgMatch)) continue;
 
-            // ✅ mute chain 不參與（不選參數，也不當 target）
-            const chainIdx = (this.liveNodes.get(modId + ":chainIdx") ?? -1) | 0;
-            if (chainIdx >= 0) {
+        // ✅ mute chain 不參與
+        const chainIdx = (this.liveNodes.get(modId + ":chainIdx") ?? -1) | 0;
+        if (chainIdx >= 0) {
             const cg = this.liveNodes.get(`chainGain:${chainIdx}`);
             const gv = cg?.gain?.value;
             if (typeof gv === "number" && gv <= 0.0001) continue;
+        }
+
+        matches.push({ modId, outNode, params: p });
+    }
+
+    if (!matches.length) {
+        return false;
+    }
+
+    const now = this.actx.currentTime;
+    const a4 = (this.midiSynth && typeof this.midiSynth.a4_freq === "number")
+        ? this.midiSynth.a4_freq
+        : 440;
+    const f = a4 * Math.pow(2, (note - 69) / 12);
+    const sr = this.actx.sampleRate;
+
+    // KS voice registry（讓 noteOff / sustain release 用）
+    if (!this.liveNodes.has("__ksVoices__")) this.liveNodes.set("__ksVoices__", {});
+    const ksVoicesByCh = this.liveNodes.get("__ksVoices__");
+    if (!ksVoicesByCh[ch]) ksVoicesByCh[ch] = {};
+
+    // ✅ 確保 bfSet 容器存在（給 MidiSynthCore.setBend 用）
+    try {
+        if (!this.midiSynth.bfSet) this.midiSynth.bfSet = {};
+        if (!this.midiSynth.bfSet[ch]) this.midiSynth.bfSet[ch] = {};
+    } catch {}
+
+    let any = false;
+
+    for (const m of matches) {
+        const params = m.params || {};
+
+        // === seed noise ===
+        let seed = null;
+        try {
+            const type = String(params.seedNoiseType ?? "pink");
+            const len = Math.max(2048, Math.round(sr / Math.max(1e-6, f)));
+
+            const makeWhite = (L) => {
+                const out = new Float32Array(L);
+                for (let i = 0; i < L; i++) out[i] = Math.random() * 2 - 1;
+                return out;
+            };
+
+            const makePink = (L) => {
+                const out = new Float32Array(L);
+                let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
+                for (let i=0;i<L;i++){
+                    const w = Math.random()*2-1;
+                    b0 = 0.99886*b0 + w*0.0555179;
+                    b1 = 0.99332*b1 + w*0.0750759;
+                    b2 = 0.969  *b2 + w*0.153852;
+                    b3 = 0.8665 *b3 + w*0.3104856;
+                    b4 = 0.55   *b4 + w*0.5329522;
+                    b5 = -0.7616*b5 - w*0.016898;
+                    out[i] = (b0+b1+b2+b3+b4+b5+b6*0.5362)*0.11;
+                    b6 = w*0.115926;
+                }
+                return out;
+            };
+
+            const makeBrown = (L) => {
+                const out = new Float32Array(L);
+                let acc = 0;
+                for (let i = 0; i < L; i++) {
+                    acc += Math.random()*2 - 1;
+                    acc = Math.max(-8, Math.min(8, acc));
+                    out[i] = acc / 8;
+                }
+                return out;
+            };
+
+            const makeGrey = (L) => {
+                const w = makeWhite(L);
+                const p = makePink(L);
+                const out = new Float32Array(L);
+                for (let i = 0; i < L; i++) out[i] = 0.6 * w[i] + 0.4 * p[i];
+                return out;
+            };
+
+            const makeRed = (L) => {
+                const out = new Float32Array(L);
+                let x = 0, y = 0;
+                for (let i = 0; i < L; i++) {
+                    x += (Math.random()*2 - 1) * 0.02;
+                    y += x;
+                    out[i] = y * 0.0005;
+                }
+                return out;
+            };
+
+            const makeBlue = (L) => {
+                const tmp = new Float32Array(L);
+                let last = 0;
+                for (let i = 0; i < L; i++) {
+                    const w = Math.random()*2 - 1;
+                    tmp[i] = w - last;
+                    last = w;
+                }
+                const out = new Float32Array(L);
+                let lp = 0;
+                for (let i = 0; i < L; i++) {
+                    lp = lp * 0.992 + tmp[i] * 0.008;
+                    out[i] = lp;
+                }
+                return out;
+            };
+
+            const makeViolet = (L) => {
+                const tmp = new Float32Array(L);
+                let last = 0;
+                for (let i = 0; i < L; i++) {
+                    const w = Math.random()*2 - 1;
+                    tmp[i] = w - last;
+                    last = w;
+                }
+                const out = new Float32Array(L);
+                let lp = 0;
+                for (let i = 0; i < L; i++) {
+                    lp = lp * 0.995 + tmp[i] * 0.005;
+                    out[i] = lp;
+                }
+                return out;
+            };
+
+            const makeSoftBrown = (L) => {
+                const brown = makeBrown(L);
+                const out = new Float32Array(L);
+                let lp = 0;
+                for (let i = 0; i < L; i++) {
+                    lp = lp * 0.995 + brown[i] * 0.005;
+                    out[i] = lp * 0.9;
+                }
+                return out;
+            };
+
+            const makeSoftPink = (L) => {
+                const pink = makePink(L);
+                const out = new Float32Array(L);
+                let lp = 0;
+                for (let i = 0; i < L; i++) {
+                    lp = lp * 0.993 + pink[i] * 0.007;
+                    out[i] = lp * 0.9;
+                }
+                return out;
+            };
+
+            const makeWind = (L) => {
+                const out = new Float32Array(L);
+                let lp = 0;
+                let env = 0;
+                for (let i = 0; i < L; i++) {
+                    const w = Math.random()*2 - 1;
+                    lp = lp * 0.985 + w * 0.015;
+                    env = env * 0.995 + (Math.random()*2 - 1) * 0.005;
+                    const e = 0.6 + 0.4 * env;
+                    out[i] = lp * e;
+                }
+                return out;
+            };
+
+            const makePerlin = (L) => {
+                const out = new Float32Array(L);
+                const seg = Math.max(8, Math.floor(L / 64));
+                const points = [];
+                const nPoints = Math.floor(L / seg) + 2;
+                for (let i = 0; i < nPoints; i++) points[i] = Math.random()*2 - 1;
+                const fade = (t) => t*t*t*(t*(t*6 - 15) + 10);
+                for (let i = 0; i < L; i++) {
+                    const x = i / seg;
+                    const i0 = Math.floor(x);
+                    const t = x - i0;
+                    const a = points[i0];
+                    const b = points[i0+1];
+                    const ft = fade(t);
+                    out[i] = (a*(1-ft) + b*ft) * 0.9;
+                }
+                return out;
+            };
+
+            const makeFormant = (L) => {
+                const out = new Float32Array(L);
+                const base = makeWhite(L);
+                const f1 = 300, f2 = 800, f3 = 2500;
+                for (let i = 0; i < L; i++) {
+                    const t = i / sr;
+                    const mm =
+                        1.0
+                        + 0.6 * Math.sin(2 * Math.PI * f1 * t)
+                        + 0.4 * Math.sin(2 * Math.PI * f2 * t + 1.3)
+                        + 0.25 * Math.sin(2 * Math.PI * f3 * t + 0.7);
+                    out[i] = base[i] * (mm * 0.25);
+                }
+                return out;
+            };
+
+            const makeDust = (L) => {
+                const out = new Float32Array(L);
+                let current = 0;
+                const p = 0.004;
+                for (let i = 0; i < L; i++) {
+                    if (Math.random() < p) current += (Math.random() * 2 - 1) * 0.9;
+                    current *= 0.96;
+                    out[i] = current;
+                }
+                return out;
+            };
+
+            const makeWood = (L) => {
+                const base = makeSoftPink(L);
+                const out = new Float32Array(L);
+                const fLow = 220;
+                const fMid = 550;
+                for (let i = 0; i < L; i++) {
+                    const t = i / sr;
+                    const tone =
+                        0.5 * Math.sin(2*Math.PI*fLow*t) +
+                        0.35 * Math.sin(2*Math.PI*fMid*t + 1.1);
+                    out[i] = base[i] * (1.0 + 0.4 * tone);
+                }
+                return out;
+            };
+
+            switch (type) {
+                case "white":      seed = makeWhite(len); break;
+                case "pink":       seed = makePink(len); break;
+                case "brown":      seed = makeBrown(len); break;
+                case "softBrown":  seed = makeSoftBrown(len); break;
+                case "softPink":   seed = makeSoftPink(len); break;
+                case "red":        seed = makeRed(len); break;
+                case "blue":       seed = makeBlue(len); break;
+                case "violet":     seed = makeViolet(len); break;
+                case "gray":       seed = makeGrey(len); break;
+                case "wind":       seed = makeWind(len); break;
+                case "perlin":     seed = makePerlin(len); break;
+                case "formant":    seed = makeFormant(len); break;
+                case "dust":       seed = makeDust(len); break;
+                case "wood":       seed = makeWood(len); break;
+                default:           seed = makePink(len); break;
             }
 
-            matches.push({ modId, outNode, params: p });
+        } catch (e) {
+            console.warn("[RC] seed generation failed, fallback pink", e);
+            const fallbackLen = 2048;
+            seed = new Float32Array(fallbackLen);
+            for (let i = 0; i < fallbackLen; i++) seed[i] = Math.random()*2 - 1;
         }
 
-        if (!matches.length) {
-            // 沒有任何匹配 → 讓 gate() 決定是否要 fallback
-            // （你目前 gate() 會同時 gateOsc，所以這裡回 false 是 OK 的）
-            return false;
-        }
+        // dur
+        let durSec = Number(params.ksDurSec);
+        if (!Number.isFinite(durSec)) durSec = 1.0;
+        durSec = Math.min(Math.max(durSec, 0.1), 10.0);
 
-        const now = this.actx.currentTime;
-        const a4 = (this.midiSynth && typeof this.midiSynth.a4_freq === "number") ? this.midiSynth.a4_freq : 440;
-        const f = a4 * Math.pow(2, (note - 69) / 12);
-        const sr = this.actx.sampleRate;
+        const frames = Math.round(sr * durSec);
+        const bf = this.actx.createBuffer(2, frames, sr);
 
-        // 確保 KS voice registry（讓 noteOff 能逐一 release）
-        if (!this.liveNodes.has("__ksVoices__")) this.liveNodes.set("__ksVoices__", {});
-        const ksVoicesByCh = this.liveNodes.get("__ksVoices__");
-        if (!ksVoicesByCh[ch]) ksVoicesByCh[ch] = {};
+        // smoothing
+        const mode = String(params.smoothingMode ?? "auto");
+        const opts = this.midiSynth?.options?.[ch] ?? {};
+        let smoothingFactor;
 
-        // ✅ 每個 match 各自生成自己的 KS buffer（各自 params）
-        let any = false;
-
-        for (const m of matches) {
-            const params = m.params || {};
-
-            // === 準備 seed 噪音（沿用你原本的做法）===
-            let seed = null;
+        if (mode === "manual") {
+            let s = Number(params.smoothingFactor);
+            if (!Number.isFinite(s)) s = 0.2;
+            if (s < 0.01) s = 0.01;
+            if (s > 0.99) s = 0.99;
+            smoothingFactor = s;
+        } else {
             try {
-                const type = String(params.seedNoiseType ?? "pink");
-
-                // 建議長度：跟頻率有關
-                const len = Math.max(2048, Math.round(sr / Math.max(1e-6, f)));
-
-                // === 基本噪音 ===
-                const makeWhite = (L) => {
-                    const out = new Float32Array(L);
-                    for (let i = 0; i < L; i++) out[i] = Math.random() * 2 - 1;
-                    return out;
-                };
-
-                const makePink = (L) => {
-                    const out = new Float32Array(L);
-                    let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
-                    for (let i=0;i<L;i++){
-                        const w = Math.random()*2-1;
-                        b0 = 0.99886*b0 + w*0.0555179;
-                        b1 = 0.99332*b1 + w*0.0750759;
-                        b2 = 0.969  *b2 + w*0.153852;
-                        b3 = 0.8665 *b3 + w*0.3104856;
-                        b4 = 0.55   *b4 + w*0.5329522;
-                        b5 = -0.7616*b5 - w*0.016898;
-                        out[i] = (b0+b1+b2+b3+b4+b5+b6*0.5362)*0.11;
-                        b6 = w*0.115926;
-                    }
-                    return out;
-                };
-
-                const makeBrown = (L) => {
-                    const out = new Float32Array(L);
-                    let acc = 0;
-                    for (let i = 0; i < L; i++) {
-                        acc += Math.random()*2 - 1;
-                        acc = Math.max(-8, Math.min(8, acc));
-                        out[i] = acc / 8;
-                    }
-                    return out;
-                };
-
-                const makeGrey = (L) => {
-                    const w = makeWhite(L);
-                    const p = makePink(L);
-                    const out = new Float32Array(L);
-                    for (let i = 0; i < L; i++) {
-                        out[i] = 0.6 * w[i] + 0.4 * p[i];
-                    }
-                    return out;
-                };
-
-                // === 已有：更 soft / 彩色的變體 ===
-
-                // 🔴 Red Noise（Brown 的二次積分 = 最 soft）
-                const makeRed = (L) => {
-                    const out = new Float32Array(L);
-                    let x = 0, y = 0;
-                    for (let i = 0; i < L; i++) {
-                        x += (Math.random()*2 - 1) * 0.02;
-                        y += x;
-                        out[i] = y * 0.0005; // scale
-                    }
-                    return out;
-                };
-
-                // 🔵 Blue Noise（差分）+ 強 LP → 柔和 friction 用
-                const makeBlue = (L) => {
-                    const tmp = new Float32Array(L);
-                    let last = 0;
-                    for (let i = 0; i < L; i++) {
-                        const w = Math.random()*2 - 1;
-                        tmp[i] = w - last;
-                        last = w;
-                    }
-                    // soft 化
-                    const out = new Float32Array(L);
-                    let lp = 0;
-                    for (let i = 0; i < L; i++) {
-                        lp = lp * 0.992 + tmp[i] * 0.008;
-                        out[i] = lp;
-                    }
-                    return out;
-                };
-
-                // 🟣 Violet Noise（高頻多）→ heavy LPF → 氣音
-                const makeViolet = (L) => {
-                    const tmp = new Float32Array(L);
-                    let last = 0;
-                    for (let i = 0; i < L; i++) {
-                        const w = Math.random()*2 - 1;
-                        tmp[i] = w - last;
-                        last = w;
-                    }
-                    const out = new Float32Array(L);
-                    let lp = 0;
-                    for (let i = 0; i < L; i++) {
-                        lp = lp * 0.995 + tmp[i] * 0.005;
-                        out[i] = lp;
-                    }
-                    return out;
-                };
-
-                // 🍫 Soft Brown：Brown → LPF
-                const makeSoftBrown = (L) => {
-                    const brown = makeBrown(L);
-                    const out = new Float32Array(L);
-                    let lp = 0;
-                    for (let i = 0; i < L; i++) {
-                        lp = lp * 0.995 + brown[i] * 0.005;
-                        out[i] = lp * 0.9;
-                    }
-                    return out;
-                };
-
-                // 🌸 Soft Pink：Pink → LPF
-                const makeSoftPink = (L) => {
-                    const pink = makePink(L);
-                    const out = new Float32Array(L);
-                    let lp = 0;
-                    for (let i = 0; i < L; i++) {
-                        lp = lp * 0.993 + pink[i] * 0.007;
-                        out[i] = lp * 0.9;
-                    }
-                    return out;
-                };
-
-                // === 新增：Wind / Perlin / Formant / Dust / Wood ===
-
-                // 🌪 Wind / Turbulence：有緩慢 gust 的風聲感
-                const makeWind = (L) => {
-                    const out = new Float32Array(L);
-                    let lp = 0;     // 基本低通（風本身）
-                    let env = 0;    // gust 包絡
-                    for (let i = 0; i < L; i++) {
-                        const w = Math.random()*2 - 1;
-                        // 低通，讓能量偏低中頻
-                        lp = lp * 0.985 + w * 0.015;
-                        // 緩慢變化的 gust 包絡
-                        env = env * 0.995 + (Math.random()*2 - 1) * 0.005;
-                        const e = 0.6 + 0.4 * env;  // 0.2 ~ 1.0 左右
-                        out[i] = lp * e;
-                    }
-                    return out;
-                };
-
-                // 🧊 Perlin-like：平滑、有機的 value noise
-                const makePerlin = (L) => {
-                    const out = new Float32Array(L);
-                    const seg = Math.max(8, Math.floor(L / 64)); // 64 個控制點左右
-                    const points = [];
-                    const nPoints = Math.floor(L / seg) + 2;
-                    for (let i = 0; i < nPoints; i++) {
-                        points[i] = Math.random()*2 - 1;
-                    }
-                    const fade = (t) => t*t*t*(t*(t*6 - 15) + 10); // Perlin 常用 fade
-                    for (let i = 0; i < L; i++) {
-                        const x = i / seg;
-                        const i0 = Math.floor(x);
-                        const t = x - i0;
-                        const a = points[i0];
-                        const b = points[i0+1];
-                        const ft = fade(t);
-                        out[i] = (a*(1-ft) + b*ft) * 0.9;
-                    }
-                    return out;
-                };
-
-                // 🎵 Formant Noise：白噪 + 幾個「元音」共鳴調制
-                const makeFormant = (L) => {
-                    const out = new Float32Array(L);
-                    const base = makeWhite(L);
-                    // 簡單 A / O 類 formant 頻率（Hz）
-                    const f1 = 300, f2 = 800, f3 = 2500;
-                    for (let i = 0; i < L; i++) {
-                        const t = i / sr;
-                        const m =
-                            1.0
-                            + 0.6 * Math.sin(2 * Math.PI * f1 * t)
-                            + 0.4 * Math.sin(2 * Math.PI * f2 * t + 1.3)
-                            + 0.25 * Math.sin(2 * Math.PI * f3 * t + 0.7);
-                        // 約略正常化
-                        out[i] = base[i] * (m * 0.25);
-                    }
-                    return out;
-                };
-
-                // ⚡ Dust Noise：稀疏 impulsive，像指甲 / 靜電
-                const makeDust = (L) => {
-                    const out = new Float32Array(L);
-                    let current = 0;
-                    const p = 0.004; // 密度（越大越多顆粒）
-                    for (let i = 0; i < L; i++) {
-                        if (Math.random() < p) {
-                            // 觸發一顆粒子（帶一點隨機極性）
-                            current += (Math.random() * 2 - 1) * 0.9;
-                        }
-                        current *= 0.96; // 快速衰減
-                        out[i] = current;
-                    }
-                    return out;
-                };
-
-                // 🪵 Wood Noise：木箱體感，softPink + mid formant
-                const makeWood = (L) => {
-                    const base = makeSoftPink(L);
-                    const out = new Float32Array(L);
-                    const fLow = 220;   // 箱體低共鳴
-                    const fMid = 550;   // 木頭中頻
-                    for (let i = 0; i < L; i++) {
-                        const t = i / sr;
-                        const tone =
-                            0.5 * Math.sin(2*Math.PI*fLow*t) +
-                            0.35 * Math.sin(2*Math.PI*fMid*t + 1.1);
-                        // noise * (1 + 一點木頭共鳴調制)
-                        out[i] = base[i] * (1.0 + 0.4 * tone);
-                    }
-                    return out;
-                };
-
-                // === 選擇對應類型 ===
-                switch (type) {
-                    case "white":      seed = makeWhite(len); break;
-                    case "pink":       seed = makePink(len); break;
-                    case "brown":      seed = makeBrown(len); break;
-                    case "softBrown":  seed = makeSoftBrown(len); break;
-                    case "softPink":   seed = makeSoftPink(len); break;
-                    case "red":        seed = makeRed(len); break;
-                    case "blue":       seed = makeBlue(len); break;
-                    case "violet":     seed = makeViolet(len); break;
-                    case "gray":       seed = makeGrey(len); break;
-                    case "wind":       seed = makeWind(len); break;
-                    case "perlin":     seed = makePerlin(len); break;
-                    case "formant":    seed = makeFormant(len); break;
-                    case "dust":       seed = makeDust(len); break;
-                    case "wood":       seed = makeWood(len); break;
-
-                    default:           seed = makePink(len); break;
-                }
-
-            } catch (e) {
-                console.warn("[RC] seed generation failed, fallback pink", e);
-                // 簡單 fallback
-                const fallbackLen = 2048;
-                seed = new Float32Array(fallbackLen);
-                for (let i = 0; i < fallbackLen; i++) {
-                    seed[i] = Math.random()*2 - 1;
-                }
-            }
-
-            // dur
-            let durSec = Number(params.ksDurSec);
-            if (!Number.isFinite(durSec)) durSec = 1.0;
-            durSec = Math.min(Math.max(durSec, 0.1), 10.0);
-
-            const frames = Math.round(sr * durSec);
-            const bf = this.actx.createBuffer(2, frames, sr);
-
-            // smoothing (沿用你原本的 auto/manual)
-            const mode = String(params.smoothingMode ?? "auto");
-            const opts = this.midiSynth?.options?.[ch] ?? {};
-            let smoothingFactor;
-
-            if (mode === "manual") {
-                let s = Number(params.smoothingFactor);
-                if (!Number.isFinite(s)) s = 0.2;
-                if (s < 0.01) s = 0.01;
-                if (s > 0.99) s = 0.99;
-                smoothingFactor = s;
-            } else {
-                try {
-                    const inv127 = this.midiSynth?.inv127 ?? (1 / 127);
-                    const nn = Math.pow(note / 64, 0.5) || 0;
-                    let stringDamping = (note * inv127) * 0.85 + 0.15;
-                    if (typeof opts.stringDamping === "number") {
+                const inv127 = this.midiSynth?.inv127 ?? (1 / 127);
+                const nn = Math.pow(note / 64, 0.5) || 0;
+                let stringDamping = (note * inv127) * 0.85 + 0.15;
+                if (typeof opts.stringDamping === "number") {
                     stringDamping = opts.stringDamping;
-                    } else if (this.midiSynth?.options?.[ch]) {
+                } else if (this.midiSynth?.options?.[ch]) {
                     this.midiSynth.options[ch].stringDamping = stringDamping;
-                    }
-                    const varAmt = Number(opts.stringDampingVariation ?? 0);
-                    smoothingFactor =
+                }
+                const varAmt = Number(opts.stringDampingVariation ?? 0);
+                smoothingFactor =
                     stringDamping +
                     nn * (1 - stringDamping) * 0.5 +
                     (1 - stringDamping) * Math.random() * varAmt;
-                } catch {
-                    smoothingFactor = 0.2;
-                }
+            } catch {
+                smoothingFactor = 0.2;
             }
-            if (!Number.isFinite(smoothingFactor)) smoothingFactor = 0.2;
+        }
+        if (!Number.isFinite(smoothingFactor)) smoothingFactor = 0.2;
 
-            const velScale = Number(params.velScale == null ? 1 : params.velScale);
+        const velScale = Number(params.velScale == null ? 1 : params.velScale);
 
-            // asm pluck
-            try {
-                const aw = this.midiSynth?.asmWrapper?.[ch];
-                if (aw && typeof aw.pluck === "function") {
-                    aw.pluck(
+        // asm pluck
+        try {
+            const aw = this.midiSynth?.asmWrapper?.[ch];
+            if (aw && typeof aw.pluck === "function") {
+                aw.pluck(
                     bf,
                     seed,
                     sr,
@@ -1021,58 +991,90 @@ export class AudioEngine {
                     velocity * velScale,
                     opts,
                     0.2
-                    );
-                }
-            } catch (e) {
-                console.warn("[RC] pluck error", e);
-                continue;
+                );
             }
-
-            // BufferSource + env（每個 voice 自己一組）
-            const bfs = this.actx.createBufferSource();
-            bfs.buffer = bf;
-
-            // mod / bend
-            try {
-                const modNode = this.midiSynth?.chmod?.[ch];
-                if (modNode && bfs.detune) modNode.connect(bfs.detune);
-            } catch {}
-            try {
-                const bendVal = this.midiSynth?.bend?.[ch];
-                if (typeof bendVal === "number" && bfs.detune) bfs.detune.value = bendVal;
-            } catch {}
-
-            const env = this.actx.createGain();
-            env.gain.setValueAtTime(1, now);
-
-            // registry（注意：params 是這顆 ks_source 自己的）
-            const voiceId =
-            `${m.modId}_${note}_${performance.now().toFixed(1)}_${Math.random().toString(36).slice(2, 5)}`;
-            ksVoicesByCh[ch][voiceId] = { note, bfs, env, params, sustained: false };
-
-            bfs.addEventListener("ended", () => {
-                try {
-                    const map = this.liveNodes.get("__ksVoices__");
-                    if (map && map[ch] && map[ch][voiceId]) delete map[ch][voiceId];
-                } catch {}
-            });
-
-            // ✅ 只送到這顆 ks_source 自己的 ksOut
-            bfs.connect(env);
-            try {
-                env.connect(m.outNode);
-            } catch (e) {
-                console.warn("[RC] env.connect ksOut failed", e);
-                delete ksVoicesByCh[ch][voiceId];
-                continue;
-            }
-
-            bfs.start(now);
-            any = true;
+        } catch (e) {
+            console.warn("[RC] pluck error", e);
+            continue;
         }
 
-        return any;
+        // BufferSource + env
+        const bfs = this.actx.createBufferSource();
+        bfs.buffer = bf;
+
+        // modulation + pitch bend（✅ 改成持續追蹤）
+        try {
+            const modNode = this.midiSynth?.chmod?.[ch];
+            if (modNode && bfs.detune) modNode.connect(bfs.detune);
+        } catch (e) {
+            console.warn("[RC] mod connect failed", e);
+        }
+
+        try {
+            const bendCS = this.getBendNode(ch);
+            if (bfs.detune && bendCS) bendCS.connect(bfs.detune);
+
+            if (typeof this.midiSynth?.bend?.[ch] === "number") {
+                this.updateBend(ch, this.midiSynth.bend[ch]);
+            }
+        } catch (e) {
+            console.warn("[RC] bend connect failed", e);
+        }
+
+        const env = this.actx.createGain();
+        env.gain.setValueAtTime(1, now);
+
+        const voiceId =
+            `${m.modId}_${note}_${performance.now().toFixed(1)}_${Math.random().toString(36).slice(2, 5)}`;
+
+        ksVoicesByCh[ch][voiceId] = {
+            note,
+            bfs,
+            env,
+            params,
+            sustained: false
+        };
+
+        // ✅ 註冊回 MidiSynthCore 的 bfSet，讓 core setBend 也能掃到
+        try {
+            this.midiSynth.bfSet[ch][note] = bfs;
+        } catch {}
+
+        bfs.addEventListener("ended", () => {
+            try {
+                if (this.midiSynth?.bfSet?.[ch]?.[note] === bfs) {
+                    this.midiSynth.bfSet[ch][note] = null;
+                }
+            } catch {}
+
+            try {
+                const map = this.liveNodes.get("__ksVoices__");
+                if (map && map[ch] && map[ch][voiceId]) {
+                    delete map[ch][voiceId];
+                }
+            } catch {}
+        });
+
+        bfs.connect(env);
+        try {
+            env.connect(m.outNode);
+        } catch (e) {
+            console.warn("[RC] env.connect ksOut failed", e);
+            try {
+                if (this.midiSynth?.bfSet?.[ch]?.[note] === bfs) {
+                    this.midiSynth.bfSet[ch][note] = null;
+                }
+            } catch {}
+            delete ksVoicesByCh[ch][voiceId];
+            continue;
+        }
+
+        bfs.start(now);
+        any = true;
     }
+
+    return any;
+}
 
 
 //   pluckKS(ch, note, velocity) {
