@@ -16,38 +16,76 @@ const oscSet = {};
 // }
 
 async function initAudio() {
-  if (!ctxStart) {
-    // ⚡ 只在第一次點擊 / 觸控後建立
-    ctx = new AudioContext();
-    midi_synth = new window.MidiSynth();
-    midi_synth.setAudioContext(ctx, ctx.destination);
-    ctxStart = true;
-    console.log("AudioContext 1.0已啟動:", ctx);
+    if (!ctxStart) {
+        // 建立 AudioContext
+        ctx = new AudioContext();
 
-    AudioBtn();
+        // 建立 synth
+        midi_synth = new window.MidiSynth();
+        midi_synth.setAudioContext(ctx, ctx.destination);
 
-    // ✅ 只有 GUI 版本才有這個函式
-    if (typeof midi_synth.enableRoutingComposer === "function") {
-      await midi_synth.enableRoutingComposer({
-        button: '#composer-slot',
-        tailwind: 'auto',
-        loadChains: [
-          { idx: 0, url: "/presets/audio-chain-1.json", name: "Main KS"},
-          { idx: 1, url: "/presets/audio-chain-2.json", name: "Preset Example – Locked", locked: true },
-          { idx: 2, url: "/presets/audio-chain-2.json", name: "Preset Example – Muted", mute: true },
-        ],
-      });
-    } else {
-      console.log("這是非 GUI 版本的 MidiSynth，略過 Routing Composer 初始化。");
+        ctxStart = true;
+        console.log("AudioContext started:", ctx);
+
+        // 掛到全域，讓其他地方可用
+        window.synth = midi_synth;
+        window.midi_synth = midi_synth;
+        window.dispatchMidiMessage = dispatchMidiMessage;
+
+        // 如果有 Routing Composer，就順便掛上
+        if (typeof midi_synth.enableRoutingComposer === "function") {
+            try {
+                await midi_synth.enableRoutingComposer({
+                    button: '#composer-slot',
+                    tailwind: 'auto',
+                    loadChains: [
+                      { idx: 0, url: "/presets/audio-chain-1.json", name: "Main KS"},
+                      { idx: 1, url: "/presets/audio-chain-2.json", name: "Preset Example – Locked", locked: true },
+                      { idx: 2, url: "/presets/audio-chain-2.json", name: "Preset Example – Muted", mute: true },
+                    ],
+                });
+            } catch (e) {
+                console.warn("enableRoutingComposer failed:", e);
+            }
+        }
+
+        // 給 midi-cc-panel 用的 hooks
+        // 這樣沒有 MIDI port 時，panel 也能直接控制 synth
+        window.midiCcPanelHooks = {
+            onCC(ch, cc, value) {
+                const status = 0xB0 | ((ch - 1) & 0x0f);
+                dispatchMidiMessage(
+                    [status, cc & 0x7f, value & 0x7f],
+                    "panel"
+                );
+            },
+
+            onPitchBend(ch, value) {
+                const v = Math.max(-8192, Math.min(8191, value)) + 8192;
+                const lsb = v & 0x7f;
+                const msb = (v >> 7) & 0x7f;
+                const status = 0xE0 | ((ch - 1) & 0x0f);
+
+                dispatchMidiMessage([status, lsb, msb], "panel");
+            }
+        };
+
+        // 等 synth / hooks 都準備好後再建立 panel
+        if (typeof createMidiCcPanel === "function" && !window.__midiCcPanelCreated) {
+            const panelUI = createMidiCcPanel("#panel-ui");
+            panelUI.setOffset(150, 16);
+            window.__midiCcPanelCreated = true;
+            window.__midiCcPanelUI = panelUI;
+        }
+
+    } else if (ctx && ctx.state === "suspended") {
+        try {
+            await ctx.resume();
+            console.log("AudioContext resumed");
+        } catch (e) {
+            console.warn("AudioContext resume failed:", e);
+        }
     }
-
-  } else if (ctx.state === "suspended") {
-    ctx.resume().then(() => {
-      console.log("AudioContext 已恢復");
-    });
-  }
-
-  window.synth = midi_synth;
 }
 
 // 綁定互動事件
@@ -189,46 +227,50 @@ async function loadKarplusStrong(freq = 110, duration = 12, harmonics = 0.5, low
     });
   }
   
+function dispatchMidiMessage(data, source = 'virtual') {
+    if (!data || !data.length || !midi_synth) return;
 
+    const command = data[0] >> 4;
+    const channel = data[0] & 0xf;
+    const note = data[1];
+    const velocity = data[2] ?? 0;
+
+    // 有開 playInput 時，統一把訊息送進 synth
+    if (typeof playInput !== 'undefined' && playInput) {
+        midi_synth.send(data);
+    }
+
+    // All Notes Off / All Sound Off
+    if (command === 11 && (note === 120 || note === 123)) {
+        drainAllNotesOff();
+        console.log(`[${source}] AllNotesOff: ch=${channel + 1} (CC ${note})`);
+        return;
+    }
+
+    console.log(`[${source}] command: ${command}, channel: ${channel}, note: ${note}, velocity: ${velocity}`);
+
+    // UI 鍵盤亮燈仍然走這裡
+    if (note > 20 && note < 109) {
+        if (command === 8) {
+            keyOff(document.getElementsByClassName(midiToId[note])[0], note, 'ext');
+        }
+        else if (command === 9) {
+            if (velocity === 0) {
+                keyOff(document.getElementsByClassName(midiToId[note])[0], note, 'ext');
+            }
+            else {
+                if (channelFilter[channel] == 1) {
+                    keyOn(document.getElementsByClassName(midiToId[note])[0], note, velocity, channel, source);
+                }
+            }
+        }
+    }
+}
 
 
 
 function handleInput(input){
-    const command = input.data[0] >> 4;
-    const channel = input.data[0] & 0xf;
-    const note = input.data[1];
-    const velocity = input.data[2];
-
-    if (typeof playInput !== 'undefined' && playInput) {
-        midi_synth.send(input.data);
-    }
-
-    if (command === 11 /* CC */ && (note === 120 || note === 123)) {
-         drainAllNotesOff();
-        console.log(`AllNotesOff: ch=${channel+1} (CC ${note})`);
-        return;
-    }
-
-    console.log(`command: ${command}, channel: ${channel}, note: ${note}, velocity: ${velocity}`);
-
-    if(note>20&&note<109){
-        if(command==8) {
-            keyOff(document.getElementsByClassName(midiToId[note])[0], note);
-        }
-        else if(command==9) {
-            if(velocity==0) {
-                keyOff(document.getElementsByClassName(midiToId[note])[0], note);
-            }
-            else {
-                if (channelFilter[channel]==1) {
-                    keyOn(document.getElementsByClassName(midiToId[note])[0], note, velocity, channel, 'ext');
-                }
-                
-            }
-        }
-    }
-    
-    
+    dispatchMidiMessage(input.data, 'ext');
 }
 
 function allNotesOff() {
