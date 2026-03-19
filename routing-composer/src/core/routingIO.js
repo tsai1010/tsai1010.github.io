@@ -3,6 +3,7 @@
 // Routing Composer - JSON I/O helpers
 // - normalize full routing state
 // - normalize single-chain JSON
+// - (patched) support global synth params (a4, masterVol)
 // -------------------------------------------------------------
 
 function isModule(obj) {
@@ -17,30 +18,33 @@ function normalizeChain(chain, opts = {}) {
   return chain
     .filter(isModule)
     .map((m) => {
-      const baseId = m.id || `${m.kind}_${Math.random().toString(36).slice(2, 9)}`;
+      const baseId =
+        m.id || `${m.kind}_${Math.random().toString(36).slice(2, 9)}`;
       return {
         id: idPrefix ? `${idPrefix}${baseId}` : baseId,
         kind: m.kind,
         enabled: m.enabled !== false,
-        params: typeof m.params === "object" && m.params ? { ...m.params } : {},
+        params:
+          typeof m.params === "object" && m.params ? { ...m.params } : {},
       };
     });
 }
 
-
 /**
  * Normalize full routing JSON
  * Accepts:
- *  - { chains, chainMeta?, mutes?, version? }
+ *  - { chains, chainMeta?, mutes?, global?, version? }
  *  - or directly Array<Array<Module>>
  */
 export function normalizeRoutingState(json) {
   if (!json) return null;
 
-  // case: direct chains array
+  // --- case: direct chains array ---
   if (Array.isArray(json) && Array.isArray(json[0])) {
     const chains = json
-      .map((chain, idx) => normalizeChain(chain, { idPrefix: `c${idx}_` }))
+      .map((chain, idx) =>
+        normalizeChain(chain, { idPrefix: `c${idx}_` })
+      )
       .filter(Boolean);
 
     return {
@@ -48,15 +52,18 @@ export function normalizeRoutingState(json) {
       chains,
       chainMeta: chains.map(() => ({})),
       mutes: chains.map(() => false),
+      global: null, // ✅ 舊格式 → 沒 global
     };
   }
 
-  // case: object form
+  // --- case: object form ---
   const chainsRaw = json.chains;
   if (!Array.isArray(chainsRaw)) return null;
 
   const chains = chainsRaw
-    .map((chain, idx) => normalizeChain(chain, { idPrefix: `c${idx}_` }))
+    .map((chain, idx) =>
+      normalizeChain(chain, { idPrefix: `c${idx}_` })
+    )
     .filter(Boolean);
 
   const chainMeta = Array.isArray(json.chainMeta)
@@ -71,14 +78,31 @@ export function normalizeRoutingState(json) {
 
   while (mutes.length < chains.length) mutes.push(false);
 
+  // ✅ NEW: global params（可選）
+  let global = null;
+
+  if (json.global && typeof json.global === "object") {
+    global = {
+      a4:
+        typeof json.global.a4 === "number"
+          ? json.global.a4
+          : undefined,
+
+      masterVol:
+        typeof json.global.masterVol === "number"
+          ? json.global.masterVol
+          : undefined,
+    };
+  }
+
   return {
     version: Number(json.version) || 1,
     chains,
     chainMeta,
     mutes,
+    global, // ✅ 加進來
   };
 }
-
 
 /**
  * Normalize single-chain JSON
@@ -91,7 +115,9 @@ export function normalizeSingleChain(json, opts = {}) {
 
   const normalizeMods = (arr) =>
     (Array.isArray(arr) ? arr : []).map((m, i) => {
-      const baseId = m.id || `${m.kind}_${i}_${Math.random().toString(36).slice(2, 8)}`;
+      const baseId =
+        m.id ||
+        `${m.kind}_${i}_${Math.random().toString(36).slice(2, 8)}`;
       return {
         ...m,
         id: idPrefix ? `${idPrefix}${baseId}` : baseId,
@@ -104,6 +130,7 @@ export function normalizeSingleChain(json, opts = {}) {
   if (Array.isArray(json)) {
     return { chain: normalizeMods(json), meta: {}, mute: false };
   }
+
   if (json && Array.isArray(json.chain)) {
     return {
       chain: normalizeMods(json.chain),
@@ -111,6 +138,6 @@ export function normalizeSingleChain(json, opts = {}) {
       mute: !!json.mute,
     };
   }
+
   return null;
 }
-
