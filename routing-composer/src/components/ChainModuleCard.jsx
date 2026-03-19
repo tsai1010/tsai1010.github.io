@@ -8,7 +8,7 @@
 //   - onParam(key, value): void
 // -------------------------------------------------------------
 
-import React from "react";
+import React, { useEffect, useState } from "react";
 
 // (可集中到 ui/tokens.js，暫時放這裡方便開始)
 const cardClass =
@@ -16,45 +16,135 @@ const cardClass =
 const buttonClass =
   "px-3 py-1 rounded-xl border border-white/10 shadow hover:bg-white/5 active:scale-[.98] transition";
 
-// 小工具滑桿
-function ParamSlider({ label, min, max, step = 0.01, value, onChange, suffix }) {
-    const shown =
-        typeof value === "number"
-            ? (Math.round(value * 100) / 100).toFixed(2)
-            : String(value ?? "");
-    const v = Number(value ?? 0);
-    const a = Number(min ?? 0);
-    const b = Number(max ?? 1);
-    const pos = Math.max(0, Math.min(1, (v - a) / (b - a))) * 100; // 百分比
+// ------------------------------
+// helpers
+// ------------------------------
+function clamp(v, min, max) {
+  return Math.min(max, Math.max(min, v));
+}
+
+function countDecimals(n) {
+  const s = String(n ?? "");
+  if (!s.includes(".")) return 0;
+  return s.split(".")[1].length;
+}
+
+function formatNumber(value, step = 0.01) {
+  if (!Number.isFinite(value)) return "";
+  const decimals = Math.min(6, Math.max(0, countDecimals(step)));
+  return Number(value).toFixed(decimals);
+}
+
+// 小工具滑桿 + 數字輸入
+function ParamSlider({
+  label,
+  min,
+  max,
+  step = 0.01,
+  value,
+  onChange,
+  suffix,
+}) {
+  const a = Number(min ?? 0);
+  const b = Number(max ?? 1);
+  const s = Number(step ?? 0.01);
+
+  const numericValue = Number.isFinite(Number(value)) ? Number(value) : a;
+  const clampedValue = clamp(numericValue, a, b);
+  const pos = Math.max(0, Math.min(1, (clampedValue - a) / (b - a))) * 100;
+
+  const [inputValue, setInputValue] = useState(formatNumber(clampedValue, s));
+
+  // 外部 value 改變時，同步更新 input 顯示
+  useEffect(() => {
+    setInputValue(formatNumber(clampedValue, s));
+  }, [clampedValue, s]);
+
+  const commitInput = () => {
+    let parsed = Number(inputValue);
+
+    if (inputValue === "" || Number.isNaN(parsed)) {
+      setInputValue(formatNumber(clampedValue, s));
+      return;
+    }
+
+    parsed = clamp(parsed, a, b);
+
+    // 依 step 做對齊
+    if (s > 0) {
+      parsed = Math.round(parsed / s) * s;
+      parsed = clamp(parsed, a, b);
+    }
+
+    onChange(parsed);
+    setInputValue(formatNumber(parsed, s));
+  };
 
   return (
     <div className="flex items-center gap-3">
       <div className="w-24 text-sm opacity-80">{label}</div>
+
       <input
         type="range"
-        className="w-48 rc-slider"
-        min={min}
-        max={max}
-        step={step}
-        value={Number(value ?? 0)}
-        onChange={(e) => onChange(Number(e.target.value))}
+        className="w-40 rc-slider"
+        min={a}
+        max={b}
+        step={s}
+        value={clampedValue}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          if (Number.isNaN(v)) return;
+          onChange(v);
+        }}
         onMouseUp={(e) => e.currentTarget.blur()}
         onTouchEnd={(e) => e.currentTarget.blur()}
         style={{ "--rc-pos": `${pos}%` }}
       />
-      <div className="w-20 tabular-nums text-right text-xs opacity-70">
-        {shown}
-        {suffix ? <span className="opacity-60">{suffix}</span> : null}
+
+      <div className="flex items-center gap-1 w-24">
+        <input
+          type="number"
+          className="w-16 bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-xs text-right tabular-nums"
+          min={a}
+          max={b}
+          step={s}
+          value={inputValue}
+          onChange={(e) => {
+            setInputValue(e.target.value);
+          }}
+          onBlur={commitInput}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              commitInput();
+              e.currentTarget.blur();
+            }
+            if (e.key === "Escape") {
+              setInputValue(formatNumber(clampedValue, s));
+              e.currentTarget.blur();
+            }
+          }}
+        />
+        {suffix ? (
+          <span className="text-xs opacity-60 w-6">{suffix}</span>
+        ) : (
+          <span className="w-6" />
+        )}
       </div>
     </div>
   );
 }
 
-export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDragStart }) {
+export default function ChainModuleCard({
+  mod,
+  onToggle,
+  onRemove,
+  onParam,
+  onDragStart,
+}) {
   const { kind, enabled, params = {} } = mod;
 
   return (
-    <div className={`${cardClass} w-[280px]`}>
+    <div className={`${cardClass} w-[300px]`}>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -73,12 +163,19 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
           <button className={buttonClass} onClick={onToggle}>
             {enabled ? "Bypass" : "Enable"}
           </button>
-          <button className={buttonClass} onClick={onRemove} title="Remove module">
+          <button
+            className={buttonClass}
+            onClick={onRemove}
+            title="Remove module"
+          >
             ×
           </button>
         </div>
       </div>
-      <div className="mt-2 text-xs opacity-70">{enabled ? "active" : "bypassed"}</div>
+
+      <div className="mt-2 text-xs opacity-70">
+        {enabled ? "active" : "bypassed"}
+      </div>
 
       {/* Body */}
       <div className="mt-3 space-y-2">
@@ -137,7 +234,9 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
                 }}
               >
                 {["auto", "manual"].map((t) => (
-                  <option key={t} value={t}>{t}</option>
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
                 ))}
               </select>
             </div>
@@ -148,6 +247,7 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
                 label="smooth"
                 min={0}
                 max={1}
+                step={0.01}
                 value={Number(params.smoothingFactor ?? 0.2)}
                 onChange={(v) => onParam("smoothingFactor", v)}
               />
@@ -158,6 +258,7 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
               label="velScale"
               min={0}
               max={1}
+              step={0.01}
               value={Number(params.velScale ?? 1)}
               onChange={(v) => onParam("velScale", v)}
             />
@@ -183,7 +284,7 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
               onChange={(v) => onParam("ksRelease", v)}
             />
 
-            {/* Seed type - 音樂化 Soft/Warm/Bright/Mix（擴充版） */}
+            {/* Seed type */}
             <div className="flex items-center gap-2">
               <div className="w-24 text-sm opacity-80">Noise</div>
               <select
@@ -194,7 +295,6 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
                   e.target.blur();
                 }}
               >
-                {/* 你原本的四種 */}
                 <option value="brown">Soft</option>
                 <option value="softBrown">Extra Soft</option>
                 <option value="red">Deep Soft</option>
@@ -217,76 +317,96 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
               </select>
             </div>
 
-
-
             {String(params.smoothingMode ?? "auto") === "auto" && (
               <div className="text-[11px] opacity-70">
-                auto: smoothing 依據 synth.options[ch].stringDamping / variation 與 note 計算
+                auto: smoothing 依據 synth.options[ch].stringDamping /
+                variation 與 note 計算
               </div>
             )}
           </>
         )}
 
-
         {/* basic oscillator source */}
         {kind === "source" && (
           <>
             <div className="flex items-center gap-2">
-                <div className="w-24 text-sm opacity-80">MIDI ch</div>
-                <select
-                    className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
-                    value={String(mod.params.ch ?? "all")}
-                    onChange={(e) => {
-                      onParam("ch", e.target.value);
-                      e.target.blur();
-                    }}
-                >
-                    <option value="all">all</option>
-                    {Array.from({ length: 16 }, (_, i) => (
-                        <option key={i} value={String(i)}>{i}</option>
+              <div className="w-24 text-sm opacity-80">MIDI ch</div>
+              <select
+                className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
+                value={String(mod.params.ch ?? "all")}
+                onChange={(e) => {
+                  onParam("ch", e.target.value);
+                  e.target.blur();
+                }}
+              >
+                <option value="all">all</option>
+                {Array.from({ length: 16 }, (_, i) => (
+                  <option key={i} value={String(i)}>
+                    {i}
+                  </option>
                 ))}
-                </select>
+              </select>
             </div>
 
             <div className="flex items-center gap-2">
-                <div className="w-24 text-sm opacity-80">wave</div>
-                <select
-                    className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
-                    value={String(mod.params.type)}
-                    onChange={(e) => {
-                      onParam("type", e.target.value);
-                      e.target.blur();
-                    }}
-                >
-                    {["sine", "square", "sawtooth", "triangle"].map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                    ))}
-                </select>
+              <div className="w-24 text-sm opacity-80">wave</div>
+              <select
+                className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
+                value={String(mod.params.type)}
+                onChange={(e) => {
+                  onParam("type", e.target.value);
+                  e.target.blur();
+                }}
+              >
+                {["sine", "square", "sawtooth", "triangle"].map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            {/* Level */}
-            <ParamSlider
-              label="level"
-              min={0}
-              max={1}
-              step={0.01}
-              value={Number(mod.params.level ?? 0.15)}
-              onChange={(v) => onParam("level", v)}
-            />
-
             {/* ADSR */}
-            <ParamSlider label="attack"  min={0} max={0.2}
-                value={Number(mod.params.adsr?.a ?? 0.003)}
-                onChange={(v) => onParam("adsr", { ...(mod.params.adsr||{}), a: v })} />
-            <ParamSlider label="decay"   min={0} max={1.0}
-                value={Number(mod.params.adsr?.d ?? 0.08)}
-                onChange={(v) => onParam("adsr", { ...(mod.params.adsr||{}), d: v })} />
-            <ParamSlider label="sustain" min={0} max={1.0}
-                value={Number(mod.params.adsr?.s ?? 0.4)}
-                onChange={(v) => onParam("adsr", { ...(mod.params.adsr||{}), s: v })} />
-            <ParamSlider label="release" min={0} max={2.0}
-                value={Number(mod.params.adsr?.r ?? 0.2)}
-                onChange={(v) => onParam("adsr", { ...(mod.params.adsr||{}), r: v })} />
+            <ParamSlider
+              label="attack"
+              min={0}
+              max={0.2}
+              step={0.001}
+              value={Number(mod.params.adsr?.a ?? 0.003)}
+              onChange={(v) =>
+                onParam("adsr", { ...(mod.params.adsr || {}), a: v })
+              }
+            />
+            <ParamSlider
+              label="decay"
+              min={0}
+              max={1.0}
+              step={0.01}
+              value={Number(mod.params.adsr?.d ?? 0.08)}
+              onChange={(v) =>
+                onParam("adsr", { ...(mod.params.adsr || {}), d: v })
+              }
+            />
+            <ParamSlider
+              label="sustain"
+              min={0}
+              max={1.0}
+              step={0.01}
+              value={Number(mod.params.adsr?.s ?? 0.4)}
+              onChange={(v) =>
+                onParam("adsr", { ...(mod.params.adsr || {}), s: v })
+              }
+            />
+            <ParamSlider
+              label="release"
+              min={0}
+              max={2.0}
+              step={0.01}
+              value={Number(mod.params.adsr?.r ?? 0.2)}
+              onChange={(v) =>
+                onParam("adsr", { ...(mod.params.adsr || {}), r: v })
+              }
+            />
           </>
         )}
 
@@ -310,10 +430,12 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
                 ))}
               </select>
             </div>
+
             <ParamSlider
               label="freq"
               min={50}
               max={12000}
+              step={1}
               value={Number(params.freq ?? 1200)}
               onChange={(v) => onParam("freq", v)}
             />
@@ -321,6 +443,7 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
               label="Q"
               min={0.1}
               max={20}
+              step={0.01}
               value={Number(params.q ?? 0.7)}
               onChange={(v) => onParam("q", v)}
             />
@@ -334,6 +457,7 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
               label="time"
               min={0.01}
               max={1.2}
+              step={0.01}
               value={Number(params.time ?? 0.25)}
               onChange={(v) => onParam("time", v)}
             />
@@ -341,6 +465,7 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
               label="feedback"
               min={0}
               max={0.95}
+              step={0.01}
               value={Number(params.feedback ?? 0.35)}
               onChange={(v) => onParam("feedback", v)}
             />
@@ -348,6 +473,7 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
               label="mix"
               min={0}
               max={1}
+              step={0.01}
               value={Number(params.mix ?? 0.3)}
               onChange={(v) => onParam("mix", v)}
             />
@@ -361,6 +487,7 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
               label="decay"
               min={0.2}
               max={6}
+              step={0.1}
               value={Number(params.decay ?? 2)}
               onChange={(v) => onParam("decay", v)}
             />
@@ -368,6 +495,7 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
               label="mix"
               min={0}
               max={1}
+              step={0.01}
               value={Number(params.mix ?? 0.25)}
               onChange={(v) => onParam("mix", v)}
             />
@@ -387,7 +515,6 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
                   e.target.blur();
                 }}
               >
-                {/* 這裡先列出已知 key；若你有 registry，可改成動態 */}
                 {["IR_Gibson", "IR_piezo"].map((id) => (
                   <option key={id} value={id}>
                     {id}
@@ -395,10 +522,12 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
                 ))}
               </select>
             </div>
+
             <ParamSlider
               label="mix"
               min={0}
               max={1}
+              step={0.01}
               value={Number(params.mix ?? 0.3)}
               onChange={(v) => onParam("mix", v)}
             />
@@ -411,6 +540,7 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
             label="gain"
             min={0}
             max={1.5}
+            step={0.01}
             value={Number(params.gain ?? 0.8)}
             onChange={(v) => onParam("gain", v)}
           />
@@ -418,7 +548,9 @@ export default function ChainModuleCard({ mod, onToggle, onRemove, onParam, onDr
 
         {/* analyzer */}
         {kind === "analyzer" && (
-          <div className="text-xs opacity-70">tap to scope (no sound change)</div>
+          <div className="text-xs opacity-70">
+            tap to scope (no sound change)
+          </div>
         )}
       </div>
     </div>

@@ -46,6 +46,35 @@ function arrayMove(arr, from, to) {
   return c;
 }
 
+function getSynthGlobalState(synth) {
+  if (!synth) return null;
+
+  const out = {};
+  const a4 = Number(synth?.a4_freq);
+  const masterVol = Number(synth?.masterVol);
+
+  if (Number.isFinite(a4)) out.a4 = a4;
+  if (Number.isFinite(masterVol)) out.masterVol = masterVol;
+
+  return Object.keys(out).length ? out : null;
+}
+
+function applySynthGlobalState(synth, globalState) {
+  if (!synth || !globalState || typeof globalState !== "object") return;
+
+  if (typeof globalState.a4 === "number" && Number.isFinite(globalState.a4)) {
+    synth.a4_freq = globalState.a4;
+  }
+
+  if (typeof globalState.masterVol === "number" && Number.isFinite(globalState.masterVol)) {
+    if (typeof synth.setMasterVol === "function") {
+      synth.setMasterVol(globalState.masterVol);
+    } else {
+      synth.masterVol = globalState.masterVol;
+    }
+  }
+}
+
 export default function ChainEditor({ 
   synth,
   initialState,
@@ -54,6 +83,8 @@ export default function ChainEditor({
   const engineRef = useRef(null);
   if (!engineRef.current) engineRef.current = new AudioEngine();
   const engine = engineRef.current;
+
+  const chainScrollRefs = useRef([]);
 
   // 初始化：讓音引擎知道 midi_synth
   useEffect(() => {
@@ -114,6 +145,210 @@ export default function ChainEditor({
     });
   }, [chains.length]);
 
+  const scrollChainToRight = (chainIdx) => {
+    requestAnimationFrame(() => {
+      const el = chainScrollRefs.current[chainIdx];
+      if (!el) return;
+
+      el.scrollTo({
+        left: el.scrollWidth,
+        behavior: "smooth",
+      });
+    });
+  };
+
+  const chainAutoScrollRef = useRef({
+    activeChainIdx: null,
+    direction: 0, // -1 = left, 1 = right, 0 = stop
+    rafId: null,
+  });
+
+  const startAutoScroll = (chainIdx, direction, strength = 1) => {
+    clearInterval(glowFadeTimers.current[chainIdx]);
+    glowFadeTimers.current[chainIdx] = null;
+    const state = chainAutoScrollRef.current;
+
+    state.activeChainIdx = chainIdx;
+    state.direction = direction;
+    state.strength = strength;
+
+    if (state.rafId) return;
+
+    const tick = () => {
+      const { activeChainIdx, direction, strength } = chainAutoScrollRef.current;
+      
+      if (activeChainIdx == null || direction === 0) {
+        chainAutoScrollRef.current.rafId = null;
+        return;
+      }
+
+      const el = chainScrollRefs.current[activeChainIdx];
+      if (!el) {
+        chainAutoScrollRef.current.rafId = null;
+        return;
+      }
+
+      const minSpeed = 2;
+      const maxSpeed = 12;
+      const speed = minSpeed + (maxSpeed - minSpeed) * (strength || 0);
+      el.scrollLeft += direction * speed;
+
+      chainAutoScrollRef.current.rafId = requestAnimationFrame(tick);
+    };
+
+    state.rafId = requestAnimationFrame(tick);
+  };
+
+  const stopAutoScroll = () => {
+    const state = chainAutoScrollRef.current;
+    const activeIdx = state.activeChainIdx;
+
+    if (state.rafId) {
+      cancelAnimationFrame(state.rafId);
+      state.rafId = null;
+    }
+
+    state.direction = 0;
+    state.strength = 0;
+    state.activeChainIdx = null;
+
+    if (activeIdx != null) {
+      fadeOutGlow(activeIdx);
+    }
+  };
+
+  const handleChainMouseMove = (chainIdx, e) => {
+    const el = chainScrollRefs.current[chainIdx];
+    if (!el) return;
+
+    const rect = el.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+
+    const canScrollLeft = el.scrollLeft > 0;
+    const canScrollRight = el.scrollLeft < el.scrollWidth - el.clientWidth - 1;
+
+    const scrollOuter = 100; // 真正開始 auto-scroll 的範圍
+    const glowOuter = 250;   // 先發亮提示的範圍
+
+    // ---------- 左邊 ----------
+    if (x <= glowOuter && canScrollLeft) {
+      const glowStrength = Math.max(
+        0.3,
+        Math.min(1, (glowOuter - x) / glowOuter)
+      );
+
+      setChainEdgeGlow((prev) =>
+        prev.map((g, i) =>
+          i === chainIdx ? { left: glowStrength, right: 0 } : g
+        )
+      );
+
+      if (x <= scrollOuter) {
+        const scrollStrength = Math.max(
+          0.15,
+          Math.min(1, (scrollOuter - x) / scrollOuter)
+        );
+        startAutoScroll(chainIdx, -1, scrollStrength);
+      } else {
+        // 只停捲動，不觸發 fadeOut，保留 glow 提示
+        haltAutoScrollOnly();
+      }
+      return;
+    }
+
+    // ---------- 右邊 ----------
+    if (x >= rect.width - glowOuter && canScrollRight) {
+      const dist = rect.width - x;
+      const glowStrength = Math.max(
+        0.3,
+        Math.min(1, (glowOuter - dist) / glowOuter)
+      );
+
+      setChainEdgeGlow((prev) =>
+        prev.map((g, i) =>
+          i === chainIdx ? { left: 0, right: glowStrength } : g
+        )
+      );
+
+      if (dist <= scrollOuter) {
+        const scrollStrength = Math.max(
+          0.15,
+          Math.min(1, (scrollOuter - dist) / scrollOuter)
+        );
+        startAutoScroll(chainIdx, 1, scrollStrength);
+      } else {
+        // 只停捲動，不觸發 fadeOut，保留 glow 提示
+        haltAutoScrollOnly();
+      }
+      return;
+    }
+
+    // 完全離開 glow 區
+    stopAutoScroll();
+  };
+
+  useEffect(() => {
+    return () => {
+      stopAutoScroll();
+    };
+  }, []);
+
+  const [chainEdgeGlow, setChainEdgeGlow] = useState([]);
+
+  useEffect(() => {
+    setChainEdgeGlow((prev) => {
+      const next = Array.isArray(prev) ? prev.slice(0, chains.length) : [];
+      while (next.length < chains.length) next.push({ left: 0, right: 0 });
+      return next;
+    });
+  }, [chains.length]);
+
+  const glowFadeTimers = useRef({});
+
+  const fadeOutGlow = (chainIdx) => {
+    clearInterval(glowFadeTimers.current[chainIdx]);
+
+    glowFadeTimers.current[chainIdx] = setInterval(() => {
+      let shouldStop = false;
+
+      setChainEdgeGlow((prev) => {
+        const next = prev.map((g, i) => {
+          if (i !== chainIdx) return g;
+
+          const left = (g?.left ?? 0) * 0.9;
+          const right = (g?.right ?? 0) * 0.9;
+
+          if (left < 0.02 && right < 0.02) {
+            shouldStop = true;
+            return { left: 0, right: 0 };
+          }
+
+          return { left, right };
+        });
+
+        return next;
+      });
+
+      if (shouldStop) {
+        clearInterval(glowFadeTimers.current[chainIdx]);
+        glowFadeTimers.current[chainIdx] = null;
+      }
+    }, 50);
+  };
+
+  const haltAutoScrollOnly = () => {
+    const state = chainAutoScrollRef.current;
+
+    if (state.rafId) {
+      cancelAnimationFrame(state.rafId);
+      state.rafId = null;
+    }
+
+    state.direction = 0;
+    state.strength = 0;
+    state.activeChainIdx = null;
+  };
+
   // ------------------------------
   // Step 3-2: URL / JSON loaders
   // ------------------------------
@@ -130,6 +365,7 @@ export default function ChainEditor({
       setChains(normalized.chains);
       setChainMeta(normalized.chainMeta);
       setChainMutes(normalized.mutes);
+      applySynthGlobalState(synth, normalized.global);
 
       console.log("[RC] routing loaded from URL:", url);
     } catch (e) {
@@ -322,6 +558,7 @@ export default function ChainEditor({
   // --- 事件操作 ---
   const onAdd = (chainIdx, kind) => {
     if (isChainLocked(chainIdx)) return;
+
     setChains((cc) => {
       const copy = cc.map((c) => [...c]);
       copy[chainIdx] = [
@@ -330,6 +567,8 @@ export default function ChainEditor({
       ];
       return copy;
     });
+
+    scrollChainToRight(chainIdx);
   };
 
   const onToggle = (chainIdx, id) => {
@@ -422,9 +661,15 @@ export default function ChainEditor({
   const exportChain = (idx) => {
     const chain = chains[idx];
     if (!chain) return;
-    const normalized = chain; // 這裡先直接用現有資料
 
-    const blob = new Blob([JSON.stringify(normalized, null, 2)], {
+    const payload = {
+      version: 1,
+      chain,
+      meta: chainMeta?.[idx] || {},
+      mute: !!chainMutes?.[idx],
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], {
       type: "application/json",
     });
     const url = URL.createObjectURL(blob);
@@ -437,24 +682,34 @@ export default function ChainEditor({
 
   // 單一 chain 匯入（會取代該條線路）
   const importChain = async (idx, file) => {
-    if (isChainLocked(chainIdx)) return;
+    if (isChainLocked(idx)) return;
 
     const text = await file.text();
     try {
-      const arr = JSON.parse(text);
-      if (!Array.isArray(arr)) return;
+      const json = JSON.parse(text);
+      const normalized = normalizeSingleChain(json, { idPrefix: `c${idx}_` });
+      if (!normalized || !normalized.chain) throw new Error("Invalid single-chain JSON");
 
-      // 重新產生 module id，避免與其他 chain 撞 id
-      const normalized = arr.map((m) => ({
-        id: uid(m.kind || "mod"),
-        kind: m.kind || "gain",
-        enabled: m.enabled !== false,
-        params: m.params || {},
-      }));
+      setChains((cc) => {
+        const next = Array.isArray(cc) ? cc.slice() : [];
+        while (next.length < idx + 1) next.push([]);
+        next[idx] = normalized.chain;
+        return next;
+      });
 
-      setChains((cc) =>
-        cc.map((c, i) => (i === idx ? normalized : c))
-      );
+      setChainMeta((mm) => {
+        const next = Array.isArray(mm) ? mm.slice() : [];
+        while (next.length < idx + 1) next.push({});
+        next[idx] = normalized.meta || {};
+        return next;
+      });
+
+      setChainMutes((mm) => {
+        const next = Array.isArray(mm) ? mm.slice() : [];
+        while (next.length < idx + 1) next.push(false);
+        next[idx] = !!normalized.mute;
+        return next;
+      });
     } catch (e) {
       console.warn("[RC] importChain failed", e);
     }
@@ -467,7 +722,15 @@ export default function ChainEditor({
 
   // 匯出 / 匯入 JSON
   const exportJSON = () => {
-    const blob = new Blob([JSON.stringify(chains, null, 2)], { type: "application/json" });
+    const payload = {
+      version: 2,
+      chains,
+      chainMeta,
+      mutes: chainMutes,
+      global: getSynthGlobalState(synth),
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -478,10 +741,16 @@ export default function ChainEditor({
   const importJSON = async (file) => {
     const text = await file.text();
     try {
-      const arr = JSON.parse(text);
-      if (Array.isArray(arr) && Array.isArray(arr[0])) setChains(arr);
+      const json = JSON.parse(text);
+      const normalized = normalizeRoutingState(json);
+      if (!normalized) throw new Error("Invalid routing JSON");
+
+      setChains(normalized.chains);
+      setChainMeta(normalized.chainMeta);
+      setChainMutes(normalized.mutes);
+      applySynthGlobalState(synth, normalized.global);
     } catch (e) {
-      console.warn("Invalid chain JSON", e);
+      console.warn("[RC] importJSON failed", e);
     }
   };
 
@@ -535,119 +804,169 @@ export default function ChainEditor({
       </div>
 
       {/* Main chain list */}
-      <div className="relative border border-dashed border-white/20 rounded-2xl p-4 overflow-x-auto">
+      <div className="relative border border-dashed border-white/20 rounded-2xl p-4">
         {chains.map((chain, chainIdx) => {
           const locked = isChainLocked(chainIdx);
 
           return (
-          <div
-            key={chainIdx}
-            className={`mb-6 rounded-lg p-2
-              ${locked ? "bg-neutral-900/60 border border-yellow-500/40" : ""}`}
-          >
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-sm opacity-80">{chainMeta[chainIdx]?.name ?? `Chain #${chainIdx + 1}`}</div>
-              {locked && (
-                <span
-                  className="text-xs px-2 py-0.5 rounded
-                            border border-yellow-400
-                            text-yellow-400
-                            bg-transparent
-                            opacity-100"
-                  title="This chain is locked (GUI editing disabled)"
-                >
-                  🔒 Locked
-                </span>
-              )}
-              <div className="flex gap-2 items-center">
-                {/* 🔊 / 🔇 */}
-                <button
-                  className={buttonClass}
-                  onClick={() => toggleChainMute(chainIdx)}
-                  title={chainMutes[chainIdx] ? "Unmute chain" : "Mute chain"}
-                >
-                  {chainMutes[chainIdx] ? "🔇" : "🔊"}
-                </button>
-
-                {/* 單一 chain 匯出 */}
-                <button
-                  className={buttonClass}
-                  onClick={() => exportChain(chainIdx)}
-                >
-                  Export
-                </button>
-
-                {/* 單一 chain 匯入（取代這條） */}
-                <label className={`${buttonClass} cursor-pointer`}>
-                  Import
-                  <input
-                    type="file"
-                    accept="application/json"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) importChain(chainIdx, f);
-                      e.target.value = "";
-                    }}
-                  />
-                </label>
-
-                {/* 保留原本的 Duplicate / Delete */}
-                <button
-                  className={buttonClass}
-                  onClick={() => duplicateChain(chainIdx)}
-                >
-                  Duplicate
-                </button>
-                <button
-                  className={buttonClass}
-                  onClick={() => requestDeleteChain(chainIdx)}
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
-
-            <div className="flex gap-3 items-stretch">
-              {chain.map((mod, modIdx) => (
-                <div
-                  key={mod.id}
-                  onDrop={onDropCard(chainIdx, modIdx)}
-                  onDragOver={(e) => e.preventDefault()}
-                  className="hover:border-white/20 transition border border-transparent rounded-2xl"
-                  title="Drag to reorder"
-                >
-                  <ChainModuleCard
-                    mod={mod}
-                    onToggle={() => onToggle(chainIdx, mod.id)}
-                    onRemove={() => onRemove(chainIdx, mod.id)}
-                    onParam={(k, v) => onParam(chainIdx, mod.id, k, v)}
-                    onDragStart={onDragStartCard(chainIdx, modIdx)}
-                  />
+            <div
+              key={chainIdx}
+              className={`relative mb-6 rounded-lg p-2 overflow-hidden
+                ${locked ? "bg-neutral-900/60 border border-yellow-500/40" : ""}`}
+            >
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm opacity-80">
+                  {chainMeta[chainIdx]?.name ?? `Chain #${chainIdx + 1}`}
                 </div>
-              ))}
-              <div
-                className="w-12 rounded-xl border-2 border-dashed border-white/10 hover:border-white/20 flex items-center justify-center opacity-60"
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={onDropToEnd(chainIdx)}
-              >
-                →
+
+                {locked && (
+                  <span
+                    className="text-xs px-2 py-0.5 rounded
+                              border border-yellow-400
+                              text-yellow-400
+                              bg-transparent
+                              opacity-100"
+                    title="This chain is locked (GUI editing disabled)"
+                  >
+                    🔒 Locked
+                  </span>
+                )}
+
+                <div className="flex gap-2 items-center">
+                  {/* 🔊 / 🔇 */}
+                  <button
+                    className={buttonClass}
+                    onClick={() => toggleChainMute(chainIdx)}
+                    title={chainMutes[chainIdx] ? "Unmute chain" : "Mute chain"}
+                  >
+                    {chainMutes[chainIdx] ? "🔇" : "🔊"}
+                  </button>
+
+                  {/* 單一 chain 匯出 */}
+                  <button
+                    className={buttonClass}
+                    onClick={() => exportChain(chainIdx)}
+                  >
+                    Export
+                  </button>
+
+                  {/* 單一 chain 匯入（取代這條） */}
+                  <label className={`${buttonClass} cursor-pointer`}>
+                    Import
+                    <input
+                      type="file"
+                      accept="application/json"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) importChain(chainIdx, f);
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+
+                  <button
+                    className={buttonClass}
+                    onClick={() => duplicateChain(chainIdx)}
+                  >
+                    Duplicate
+                  </button>
+
+                  <button
+                    className={buttonClass}
+                    onClick={() => requestDeleteChain(chainIdx)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+
+              {/* ✅ 每條 chain 自己的水平 scroll 容器 */}
+              <div className="relative rounded-xl overflow-hidden">
+                {/* 左側 U 型 glow */}
+                <div
+                  className="pointer-events-none absolute inset-y-0 left-0 w-32 z-10 transition-opacity duration-100"
+                  style={{
+                    opacity: (chainEdgeGlow[chainIdx]?.left ?? 0) > 0
+                      ? 0.35 + (chainEdgeGlow[chainIdx]?.left ?? 0) * 0.65
+                      : 0,
+                    background: `
+                      radial-gradient(120px 80px at top left, rgba(125, 211, 252, ${0.7 * (chainEdgeGlow[chainIdx]?.left ?? 0)}), rgba(125, 211, 252, 0) 70%),
+                      radial-gradient(120px 80px at bottom left, rgba(125, 211, 252, ${0.4 * (chainEdgeGlow[chainIdx]?.left ?? 0)}), rgba(125, 211, 252, 0) 70%),
+                      linear-gradient(to right, rgba(125, 211, 252, ${0.5 * (chainEdgeGlow[chainIdx]?.left ?? 0)}), rgba(125, 211, 252, 0))
+                    `,
+                  }}
+                />
+
+                {/* 右側 U 型 glow */}
+                <div
+                  className="pointer-events-none absolute inset-y-0 right-0 w-32 z-10 transition-opacity duration-100"
+                  style={{
+                    opacity: (chainEdgeGlow[chainIdx]?.right ?? 0) > 0
+                      ? 0.35 + (chainEdgeGlow[chainIdx]?.right ?? 0) * 0.65
+                      : 0,
+                    background: `
+                      radial-gradient(120px 80px at top right, rgba(125, 211, 252, ${0.7 * (chainEdgeGlow[chainIdx]?.right ?? 0)}), rgba(125, 211, 252, 0) 70%),
+                      radial-gradient(120px 80px at bottom right, rgba(125, 211, 252, ${0.4 * (chainEdgeGlow[chainIdx]?.right ?? 0)}), rgba(125, 211, 252, 0) 70%),
+                      linear-gradient(to left, rgba(125, 211, 252, ${0.5 * (chainEdgeGlow[chainIdx]?.right ?? 0)}), rgba(125, 211, 252, 0))
+                    `,
+                  }}
+                />
+
+                <div
+                  ref={(el) => {
+                    chainScrollRefs.current[chainIdx] = el;
+                  }}
+                  className="overflow-x-auto overflow-y-hidden pb-2"
+                  onMouseMove={(e) => handleChainMouseMove(chainIdx, e)}
+                  onMouseLeave={() => {
+                    stopAutoScroll();
+                  }}
+                >
+                <div className="flex gap-3 items-stretch min-w-max">
+                  {chain.map((mod, modIdx) => (
+                    <div
+                      key={mod.id}
+                      onDrop={onDropCard(chainIdx, modIdx)}
+                      onDragOver={(e) => e.preventDefault()}
+                      className="hover:border-white/20 transition border border-transparent rounded-2xl shrink-0"
+                      title="Drag to reorder"
+                    >
+                      <ChainModuleCard
+                        mod={mod}
+                        onToggle={() => onToggle(chainIdx, mod.id)}
+                        onRemove={() => onRemove(chainIdx, mod.id)}
+                        onParam={(k, v) => onParam(chainIdx, mod.id, k, v)}
+                        onDragStart={onDragStartCard(chainIdx, modIdx)}
+                      />
+                    </div>
+                  ))}
+
+                  <div
+                    className="w-12 rounded-xl border-2 border-dashed border-white/10 hover:border-white/20 flex items-center justify-center opacity-60 shrink-0"
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={onDropToEnd(chainIdx)}
+                  >
+                    →
+                  </div>
+                </div>
+              </div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {MODULES.map((k) => (
+                  <button
+                    key={`${chainIdx}-${k}`}
+                    className={buttonClass}
+                    onClick={() => onAdd(chainIdx, k)}
+                  >
+                    + {k}
+                  </button>
+                ))}
               </div>
             </div>
-
-            <div className="mt-3 flex flex-wrap gap-2">
-              {MODULES.map((k) => (
-                <button
-                  key={`${chainIdx}-${k}`}
-                  className={buttonClass}
-                  onClick={() => onAdd(chainIdx, k)}
-                >
-                  + {k}
-                </button>
-              ))}
-            </div>
-          </div>
-        )})}
+          );
+        })}
 
         {/* 新增線路按鈕：加在所有 chain 的最底下 */}
         <div className="mt-2 flex justify-center">
