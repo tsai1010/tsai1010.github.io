@@ -1220,6 +1220,22 @@ class MidiSynth {
     }
 
     async enableRoutingComposer(options = {}) {
+        // --- apply initial global params ---
+        if (options.global && typeof options.global === "object") {
+            const g = options.global;
+
+            if (typeof g.a4 === "number") {
+                this.a4_freq = g.a4;
+            }
+
+            if (typeof g.masterVol === "number") {
+                if (typeof this.setMasterVol === "function") {
+                    this.setMasterVol(g.masterVol);
+                } else {
+                    this.masterVol = g.masterVol;
+                }
+            }
+        }
         // 1) 確保 React / ReactDOM 可用（頁面沒裝就自動載）
         const React = window.React || (await import("https://esm.sh/react@18")).default;
         const ReactDOMClient = (window.ReactDOM && window.ReactDOM.createRoot)
