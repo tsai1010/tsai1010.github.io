@@ -4,6 +4,8 @@
 // Connects dynamically to an external MidiSynth instance.
 // -------------------------------------------------------------
 
+import { generatePianoExcitation } from "./excitation.js";
+
 export class AudioEngine {
   constructor(actx) {
     this.midiSynth = undefined;
@@ -19,6 +21,8 @@ export class AudioEngine {
     this.liveNodes = new Map(); // all active WebAudio nodes per chain
 
     this.irBuffers = new Map(); // key: irId, value: AudioBuffer
+
+    this.chainMuteStates = new Map();
     
 
     // ★ 新增：每個 channel 共用一顆 ConstantSource 做 bend（單位：cents）
@@ -426,24 +430,49 @@ export class AudioEngine {
     if (ksVoices)  merged.set("__ksVoices__", ksVoices);
 
     this.liveNodes = merged;
+
+    // ⭐ 重套 mute 狀態（避免 rebuild 後狀態跑掉）
+    if (this.chainMuteStates) {
+        const now = this.actx.currentTime;
+
+        for (const [idx, muted] of this.chainMuteStates.entries()) {
+            const g = this.liveNodes.get(`chainGain:${idx}`);
+            if (g?.gain) {
+                const v = muted ? 0 : 1;
+                g.gain.cancelScheduledValues(now);
+                g.gain.value = v;
+                g.gain.setValueAtTime(v, now);
+            }
+        }
+    }
   }
 
 
   setChainMute(chainIdx, muted) {
         try {
-            const key = `chainGain:${chainIdx | 0}`;
+            const id = chainIdx | 0;
+            const key = `chainGain:${id}`;
             const g = this.liveNodes && this.liveNodes.get(key);
+
+            // ⭐ 真正狀態來源（不要再靠 gain.value）
+            if (!this.chainMuteStates) this.chainMuteStates = new Map();
+            this.chainMuteStates.set(id, !!muted);
+
             if (!g || !g.gain) {
-            console.warn("[RC] setChainMute: chainGain not found", key);
-            return false;
+                console.warn("[RC] setChainMute: chainGain not found", key);
+                return false;
             }
 
             const now = this.actx.currentTime;
-            g.gain.cancelScheduledValues(now);
-            g.gain.setValueAtTime(muted ? 0.0 : 1.0, now);
 
-            console.log("[RC] setChainMute",
-            { chainIdx, key, muted, gain: g.gain.value });
+            // 清掉 automation
+            g.gain.cancelScheduledValues(now);
+
+            const v = muted ? 0.0 : 1.0;
+
+            // ⭐ 雙寫，避免 value / automation 不一致
+            g.gain.value = v;
+            g.gain.setValueAtTime(v, now);
 
             return true;
         } catch (e) {
@@ -685,9 +714,8 @@ export class AudioEngine {
         // ✅ mute chain 不參與
         const chainIdx = (this.liveNodes.get(modId + ":chainIdx") ?? -1) | 0;
         if (chainIdx >= 0) {
-            const cg = this.liveNodes.get(`chainGain:${chainIdx}`);
-            const gv = cg?.gain?.value;
-            if (typeof gv === "number" && gv <= 0.0001) continue;
+            const muted = !!this.chainMuteStates?.get(chainIdx);
+            if (muted) continue;
         }
 
         matches.push({ modId, outNode, params: p });
@@ -911,23 +939,58 @@ export class AudioEngine {
                 return out;
             };
 
-            switch (type) {
-                case "white":      seed = makeWhite(len); break;
-                case "pink":       seed = makePink(len); break;
-                case "brown":      seed = makeBrown(len); break;
-                case "softBrown":  seed = makeSoftBrown(len); break;
-                case "softPink":   seed = makeSoftPink(len); break;
-                case "red":        seed = makeRed(len); break;
-                case "blue":       seed = makeBlue(len); break;
-                case "violet":     seed = makeViolet(len); break;
-                case "gray":       seed = makeGrey(len); break;
-                case "wind":       seed = makeWind(len); break;
-                case "perlin":     seed = makePerlin(len); break;
-                case "formant":    seed = makeFormant(len); break;
-                case "dust":       seed = makeDust(len); break;
-                case "wood":       seed = makeWood(len); break;
-                default:           seed = makePink(len); break;
+            if (type === "piano") {
+                const pianoExc = generatePianoExcitation({
+                    freq: f,
+                    velocity,
+                    sampleRate: sr,
+
+                    // 先保守一點，之後再微調
+                    tonalGain: 1.0,
+                    noiseGain: 1.0,
+
+                    tonalOptions: {
+                    gain: 0.25,
+                    attackMs: 2,
+                    cycles: 8,
+                    },
+
+                    noiseOptions: {
+                    gain: 1.0,
+                    attackWindowMs: 2,
+                    },
+
+                    maxDurationSec: 0.08,
+                    minDurationSec: 0.004,
+                });
+
+                seed = new Float32Array(len);
+
+                // excitation 比 len 短就補 0；比 len 長就截掉
+                const copyLen = Math.min(len, pianoExc.length);
+                seed.set(pianoExc.subarray(0, copyLen), 0);
             }
+            else{
+                switch (type) {
+                    case "white":      seed = makeWhite(len); break;
+                    case "pink":       seed = makePink(len); break;
+                    case "brown":      seed = makeBrown(len); break;
+                    case "softBrown":  seed = makeSoftBrown(len); break;
+                    case "softPink":   seed = makeSoftPink(len); break;
+                    case "red":        seed = makeRed(len); break;
+                    case "blue":       seed = makeBlue(len); break;
+                    case "violet":     seed = makeViolet(len); break;
+                    case "gray":       seed = makeGrey(len); break;
+                    case "wind":       seed = makeWind(len); break;
+                    case "perlin":     seed = makePerlin(len); break;
+                    case "formant":    seed = makeFormant(len); break;
+                    case "dust":       seed = makeDust(len); break;
+                    case "wood":       seed = makeWood(len); break;
+                    default:           seed = makePink(len); break;
+                }
+            }
+
+            
 
         } catch (e) {
             console.warn("[RC] seed generation failed, fallback pink", e);
