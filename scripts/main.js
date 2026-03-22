@@ -194,7 +194,7 @@ function releaseAllDownKeys() {
 }
 
 function handleKeyboardDown(e) {
-  console.log('DOWN', e.key, e.keyCode || e.which);
+  // console.log('DOWN', e.key, e.keyCode || e.which);
   if (!isPlayableKey(e) || isFromUi(e)) return;
   if (e.repeat) return;
 
@@ -218,7 +218,7 @@ function handleKeyboardDown(e) {
 }
 
 function handleKeyboardUp(e) {
-  console.log('UP', e.key, e.keyCode || e.which);
+  // console.log('UP', e.key, e.keyCode || e.which);
   if (!isPlayableKey(e)) return;
 
   const code = e.keyCode || e.which;
