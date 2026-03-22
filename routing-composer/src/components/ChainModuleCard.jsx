@@ -295,6 +295,8 @@ export default function ChainModuleCard({
                   e.target.blur();
                 }}
               >
+                <option value="piano">Piano</option>
+                
                 <option value="brown">Soft</option>
                 <option value="softBrown">Extra Soft</option>
                 <option value="red">Deep Soft</option>
