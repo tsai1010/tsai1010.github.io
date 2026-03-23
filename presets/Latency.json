@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "chain": [
+    {
+      "id": "c0_ks_tqb5z3m",
+      "kind": "ks_source",
+      "enabled": true,
+      "params": {
+        "smoothingMode": "auto",
+        "smoothingFactor": 0.2,
+        "velScale": 1,
+        "seedNoiseType": "pink",
+        "useSynthA4": true,
+        "ch": "all",
+        "program": "all",
+        "ksDurSec": 10
+      }
+    },
+    {
+      "id": "c0_gain_nf8zg6s",
+      "kind": "gain",
+      "enabled": true,
+      "params": {
+        "gain": 0.35
+      }
+    }
+  ],
+  "meta": {
+    "name": "Main KS"
+  },
+  "mute": false
+}
