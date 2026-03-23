@@ -1,0 +1,855 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Synth Latency / Poly Test</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1020;
+      --card: #121a2d;
+      --card2: #0f1727;
+      --line: #26324a;
+      --text: #eef4ff;
+      --muted: #aeb8cb;
+      --accent: #7cc4ff;
+      --accent2: #9ee7c0;
+      --danger: #ff8b8b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(circle at top, #162346 0%, var(--bg) 45%);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      padding: 16px;
+    }
+    .wrap {
+      width: min(1100px, 100%);
+      margin: 0 auto;
+      display: grid;
+      gap: 14px;
+    }
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 16px;
+      box-shadow: 0 10px 28px rgba(0,0,0,.22);
+    }
+    h1, h2 { margin: 0 0 10px; }
+    h1 { font-size: 1.35rem; }
+    h2 { font-size: 1rem; }
+    p { margin: 0; line-height: 1.5; color: var(--muted); }
+    .grid, .grid-3, .grid-4 {
+      display: grid;
+      gap: 12px;
+    }
+    .grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0,1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0,1fr)); }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px;
+      background: rgba(255,255,255,.02);
+      min-height: 74px;
+    }
+    .label { color: var(--muted); font-size: .88rem; margin-bottom: 6px; }
+    .value { font-size: 1.08rem; font-weight: 700; word-break: break-word; }
+    .controls {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    .field {
+      display: grid;
+      gap: 6px;
+    }
+    .field label {
+      font-size: .87rem;
+      color: var(--muted);
+    }
+    input, select, textarea, button {
+      font: inherit;
+      color: var(--text);
+      background: #0d1320;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 11px 12px;
+    }
+    input, select, textarea { width: 100%; }
+    textarea { min-height: 84px; resize: vertical; }
+    button {
+      cursor: pointer;
+      touch-action: manipulation;
+      font-weight: 700;
+      background: #1a2438;
+    }
+    button.primary { background: #18314b; color: var(--accent); border-color: #315f89; }
+    button.good { background: #153127; color: var(--accent2); border-color: #2d7155; }
+    button.warn { background: #392222; color: #ffc0c0; border-color: #7f4545; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .btns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+      line-height: 1.52;
+      font-size: .93rem;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .94rem;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: rgba(255,255,255,.04); }
+    .small { color: var(--muted); font-size: .88rem; }
+    .ok { color: var(--accent2); }
+    .bad { color: var(--danger); }
+    @media (max-width: 920px) {
+      .grid, .grid-3, .grid-4, .controls { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="card">
+      <h1>Synth Latency / Poly Test</h1>
+      <p>Firefox-safe 版本：不使用 Routing Composer GUI，直接載入 preset、建立 AudioEngine，並在 synth 最終輸出前加 master tap analyser。</p>
+    </section>
+
+    <section class="card">
+      <h2>Paths / Setup</h2>
+      <div class="controls">
+        <div class="field">
+          <label for="midiJs">MidiSynth JS</label>
+          <input id="midiJs" value="../scripts/midisynth-gui.js" />
+        </div>
+        <div class="field">
+          <label for="engineJs">AudioEngine JS</label>
+          <input id="engineJs" value="../routing-composer/src/core/AudioEngine.js" />
+        </div>
+        <div class="field">
+          <label for="ioJs">routingIO JS</label>
+          <input id="ioJs" value="../routing-composer/src/core/routingIO.js" />
+        </div>
+        <div class="field">
+          <label for="presetUrl">Preset URL</label>
+          <input id="presetUrl" value="../presets/Latency.json" />
+        </div>
+      </div>
+      <div class="btns" style="margin-top:12px">
+        <button id="initBtn" class="primary">初始化音訊</button>
+        <button id="reloadPresetBtn">重新載入 preset</button>
+        <button id="stopAllBtn" class="warn">停止所有音</button>
+      </div>
+      <div class="small" style="margin-top:10px">若 HTML 放在 <span class="mono">demo/</span>，而 JS / presets 在上一層，這組預設路徑可直接使用。</div>
+    </section>
+
+    <section class="card">
+      <h2>Status</h2>
+      <div class="grid-4">
+        <div class="metric"><div class="label">AudioContext</div><div class="value" id="ctxState">--</div></div>
+        <div class="metric"><div class="label">sampleRate</div><div class="value" id="sampleRate">--</div></div>
+        <div class="metric"><div class="label">baseLatency</div><div class="value" id="baseLatency">--</div></div>
+        <div class="metric"><div class="label">outputLatency</div><div class="value" id="outputLatency">--</div></div>
+        <div class="metric"><div class="label">active notes</div><div class="value" id="activeNotes">0</div></div>
+        <div class="metric"><div class="label">master peak</div><div class="value" id="masterPeak">0.0000</div></div>
+        <div class="metric"><div class="label">preset status</div><div class="value" id="presetStatus">not loaded</div></div>
+        <div class="metric"><div class="label">last result</div><div class="value" id="lastResult">--</div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Latency Test</h2>
+      <div class="controls">
+        <div class="field">
+          <label for="thresholdInput">Onset threshold</label>
+          <input id="thresholdInput" type="number" step="0.0001" value="0.0030" />
+        </div>
+        <div class="field">
+          <label for="timeoutInput">Timeout (ms)</label>
+          <input id="timeoutInput" type="number" step="1" value="2500" />
+        </div>
+        <div class="field">
+          <label for="noteDurationInput">Note duration (ms)</label>
+          <input id="noteDurationInput" type="number" step="1" value="10000" />
+        </div>
+        <div class="field">
+          <label for="repeatCountInput">Auto repeat count</label>
+          <input id="repeatCountInput" type="number" step="1" min="1" value="10" />
+        </div>
+      </div>
+      <div class="btns" style="margin-top:12px">
+        <button id="singleTestBtn" class="good">單音測試（noteOn 60, 70）</button>
+        <button id="autoTestBtn">自動測多次</button>
+        <button id="cancelMeasureBtn" class="warn">取消量測</button>
+      </div>
+      <div class="small" style="margin-top:10px">單音測試保留 <span class="mono">Math.min(noteDurationMs, 1200)</span> 的提前 noteOff 行為。</div>
+    </section>
+
+    <section class="card">
+      <h2>Poly Stress</h2>
+      <div class="controls">
+        <div class="field">
+          <label for="polySelect">Target voices</label>
+          <select id="polySelect">
+            <option>4</option>
+            <option>8</option>
+            <option>16</option>
+            <option selected>32</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="refreshSelect">Refresh interval</label>
+          <select id="refreshSelect">
+            <option value="500">500 ms</option>
+            <option value="1000" selected>1000 ms</option>
+            <option value="2000">2000 ms</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="cpuInput">CPU usage (manual)</label>
+          <input id="cpuInput" placeholder="e.g. 33.9" />
+        </div>
+        <div class="field">
+          <label for="stabilitySelect">Playback stability</label>
+          <select id="stabilitySelect">
+            <option>Stable</option>
+            <option>Minor glitches</option>
+            <option>Unstable</option>
+          </select>
+        </div>
+      </div>
+      <div class="btns" style="margin-top:12px">
+        <button id="startPolyBtn">開始 poly stress</button>
+        <button id="stopPolyBtn" class="warn">停止 poly stress</button>
+        <button id="saveRowBtn">加入結果列</button>
+        <button id="clearRowsBtn">清空結果列</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Saved Rows</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Browser</th>
+            <th>Voices</th>
+            <th>Refresh</th>
+            <th>ctx mean</th>
+            <th>ctx median</th>
+            <th>ctx min</th>
+            <th>ctx max</th>
+            <th>CPU</th>
+            <th>Stability</th>
+          </tr>
+        </thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
+      <div class="btns" style="margin-top:12px">
+        <button id="exportJsonBtn">匯出 JSON</button>
+        <button id="exportCsvBtn">匯出 CSV</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Log</h2>
+      <div class="mono" id="log">等待初始化…</div>
+    </section>
+  </main>
+
+  <script type="module">
+    const $ = (id) => document.getElementById(id);
+    const el = {
+      midiJs: $("midiJs"), engineJs: $("engineJs"), ioJs: $("ioJs"), presetUrl: $("presetUrl"),
+      initBtn: $("initBtn"), reloadPresetBtn: $("reloadPresetBtn"), stopAllBtn: $("stopAllBtn"),
+      ctxState: $("ctxState"), sampleRate: $("sampleRate"), baseLatency: $("baseLatency"), outputLatency: $("outputLatency"),
+      activeNotes: $("activeNotes"), masterPeak: $("masterPeak"), presetStatus: $("presetStatus"), lastResult: $("lastResult"),
+      thresholdInput: $("thresholdInput"), timeoutInput: $("timeoutInput"), noteDurationInput: $("noteDurationInput"), repeatCountInput: $("repeatCountInput"),
+      singleTestBtn: $("singleTestBtn"), autoTestBtn: $("autoTestBtn"), cancelMeasureBtn: $("cancelMeasureBtn"),
+      polySelect: $("polySelect"), refreshSelect: $("refreshSelect"), cpuInput: $("cpuInput"), stabilitySelect: $("stabilitySelect"),
+      startPolyBtn: $("startPolyBtn"), stopPolyBtn: $("stopPolyBtn"), saveRowBtn: $("saveRowBtn"), clearRowsBtn: $("clearRowsBtn"),
+      resultsBody: $("resultsBody"), exportJsonBtn: $("exportJsonBtn"), exportCsvBtn: $("exportCsvBtn"),
+      log: $("log"),
+    };
+
+    let MidiSynthClass = null;
+    let AudioEngineClass = null;
+    let normalizeSingleChain = null;
+    let normalizeRoutingState = null;
+
+    let ctx = null;
+    let synth = null;
+    let engine = null;
+    let tapGain = null;
+    let analyser = null;
+    let meterArray = null;
+
+    let meterTimer = 0;
+    let detectRAF = 0;
+    let detectToken = 0;
+    let isMeasuring = false;
+    let polyTimer = 0;
+    let stressVoices = [];
+    let stressCursor = 0;
+    let lastStats = null;
+    let savedRows = [];
+
+    const notePalette = [48, 52, 55, 60, 64, 67, 72, 76, 79, 84, 43, 50, 57, 62, 69, 74, 81, 86, 45, 53, 58, 65, 70, 77, 82, 89, 47, 54, 59, 66, 71, 78, 83, 90];
+
+    function log(...parts) {
+      el.log.textContent = parts.join("\n");
+    }
+
+    function fmtMs(v) {
+      return (typeof v === "number" && Number.isFinite(v)) ? `${v.toFixed(2)} ms` : "--";
+    }
+
+    function fmtLatencySec(v) {
+      if (typeof v !== "number" || !Number.isFinite(v)) return "N/A";
+      if (v === 0) return "0.000000 s";
+      return `${v.toFixed(6)} s (${(v * 1000).toFixed(2)} ms)`;
+    }
+
+    function updateStatus() {
+      el.ctxState.textContent = ctx ? ctx.state : "--";
+      el.sampleRate.textContent = ctx ? `${ctx.sampleRate} Hz` : "--";
+      el.baseLatency.textContent = ctx ? fmtLatencySec(ctx.baseLatency) : "--";
+      el.outputLatency.textContent = ctx ? fmtLatencySec(ctx.outputLatency) : "--";
+      el.activeNotes.textContent = String(getActiveNoteCount());
+      el.masterPeak.textContent = readPeakAbs().toFixed(4);
+    }
+
+    function browserName() {
+      const ua = navigator.userAgent;
+      if (/Firefox\//.test(ua)) return "Firefox";
+      if (/Edg\//.test(ua)) return "Edge";
+      if (/Chrome\//.test(ua)) return "Chrome";
+      if (/Safari\//.test(ua) && !/Chrome\//.test(ua)) return "Safari";
+      return navigator.userAgent;
+    }
+
+    function median(arr) {
+      if (!arr.length) return null;
+      const s = [...arr].sort((a,b)=>a-b);
+      const mid = Math.floor(s.length / 2);
+      return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+    }
+
+    function mean(arr) {
+      return arr.length ? arr.reduce((a,b)=>a+b,0) / arr.length : null;
+    }
+
+    function min(arr) { return arr.length ? Math.min(...arr) : null; }
+    function max(arr) { return arr.length ? Math.max(...arr) : null; }
+
+    function stopDetectLoop() {
+      detectToken += 1;
+      if (detectRAF) {
+        cancelAnimationFrame(detectRAF);
+        detectRAF = 0;
+      }
+      isMeasuring = false;
+    }
+
+    function setBusy(disabled) {
+      el.initBtn.disabled = disabled;
+      el.reloadPresetBtn.disabled = disabled;
+      el.singleTestBtn.disabled = disabled;
+      el.autoTestBtn.disabled = disabled;
+    }
+
+    async function ensureImports() {
+      if (MidiSynthClass && AudioEngineClass && normalizeSingleChain && normalizeRoutingState) return;
+      const [midiMod, engineMod, ioMod] = await Promise.all([
+        import(el.midiJs.value.trim()),
+        import(el.engineJs.value.trim()),
+        import(el.ioJs.value.trim()),
+      ]);
+      MidiSynthClass = midiMod.default || midiMod.MidiSynth || window.MidiSynth;
+      AudioEngineClass = engineMod.AudioEngine;
+      normalizeSingleChain = ioMod.normalizeSingleChain;
+      normalizeRoutingState = ioMod.normalizeRoutingState;
+      if (!MidiSynthClass || !AudioEngineClass || !normalizeSingleChain || !normalizeRoutingState) {
+        throw new Error("模組載入失敗，請確認 JS 路徑是否正確。");
+      }
+    }
+
+    async function ensureResumed() {
+      if (ctx?.state === "suspended") await ctx.resume();
+      if (synth?.actx?.state === "suspended") await synth.actx.resume();
+      if (engine?.actx?.state === "suspended") await engine.actx.resume();
+    }
+
+    function connectMasterTap() {
+      try { engine.masterGain.disconnect(); } catch {}
+      engine.masterGain.connect(tapGain);
+    }
+
+    function attachRouting() {
+      synth.attachRoutingComposer({
+        engine,
+        onNoteOn: (ch, note, vel) => {
+          engine.handleMIDIMsg(new Uint8Array([0x90 | (ch & 0x0f), note & 0x7f, vel & 0x7f]));
+        },
+        onNoteOff: (ch, note) => {
+          engine.handleMIDIMsg(new Uint8Array([0x80 | (ch & 0x0f), note & 0x7f, 0]));
+        },
+      });
+    }
+
+    async function initAudio() {
+      try {
+        stopDetectLoop();
+        stopPolyStress();
+        await ensureImports();
+
+        if (!ctx) {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          ctx = new Ctx();
+          tapGain = ctx.createGain();
+          tapGain.gain.value = 1;
+          analyser = ctx.createAnalyser();
+          analyser.fftSize = 2048;
+          analyser.smoothingTimeConstant = 0;
+          meterArray = new Float32Array(analyser.fftSize);
+          tapGain.connect(analyser);
+          tapGain.connect(ctx.destination);
+
+          synth = new MidiSynthClass();
+          synth.setAudioContext(ctx, tapGain);
+
+          engine = new AudioEngineClass(ctx);
+          engine.setMidiSynth(synth);
+          connectMasterTap();
+          attachRouting();
+        }
+
+        await ensureResumed();
+        await loadPreset();
+        startMeter();
+        updateStatus();
+        log(
+          "初始化完成",
+          `browser: ${browserName()}`,
+          `baseLatency: ${fmtLatencySec(ctx.baseLatency)}`,
+          `outputLatency: ${fmtLatencySec(ctx.outputLatency)}`,
+          `sampleRate: ${ctx.sampleRate} Hz`
+        );
+      } catch (err) {
+        console.error(err);
+        log("初始化失敗", String(err?.message || err));
+      }
+    }
+
+    async function loadPreset() {
+      if (!engine || !synth) throw new Error("尚未初始化 AudioEngine / synth");
+      const url = el.presetUrl.value.trim();
+      const fallbackChain = [{
+        id: "ks_1", kind: "ks_source", enabled: true,
+        params: { ch: "all", program: "all", smoothingMode: "auto", smoothingFactor: 0.2, velScale: 1.0, ksDurSec: 10, ksRelease: 0.5, seedNoiseType: "pink" }
+      }, { id: "gain_1", kind: "gain", enabled: true, params: { gain: 0.35 } }];
+
+      let routing = null;
+      let mode = "fallback";
+      try {
+        const res = await fetch(url, { cache: "no-store" });
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+        const json = await res.json();
+        const full = normalizeRoutingState(json);
+        if (full) {
+          routing = full;
+          mode = "full";
+        } else {
+          const single = normalizeSingleChain(json, { idPrefix: "c0_" });
+          if (!single?.chain) throw new Error("Invalid preset JSON");
+          routing = {
+            version: 1,
+            chains: [single.chain],
+            chainMeta: [single.meta || {}],
+            mutes: [!!single.mute],
+            global: null,
+          };
+          mode = "single";
+        }
+      } catch (err) {
+        console.warn("preset load failed, fallback chain used", err);
+        routing = { version: 1, chains: [fallbackChain], chainMeta: [{ name: "Fallback" }], mutes: [false], global: null };
+        mode = "fallback";
+      }
+
+      if (routing.global?.a4 != null) synth.a4_freq = routing.global.a4;
+      if (routing.global?.masterVol != null && typeof synth.setMasterVol === "function") synth.setMasterVol(routing.global.masterVol);
+
+      engine.buildMany(routing.chains);
+      routing.mutes.forEach((m, idx) => engine.setChainMute(idx, !!m));
+      connectMasterTap();
+      el.presetStatus.textContent = `${mode}: ${url}`;
+    }
+
+    function startMeter() {
+      if (meterTimer) return;
+      meterTimer = window.setInterval(updateStatus, 120);
+    }
+
+    function readPeakAbs() {
+      if (!analyser || !meterArray) return 0;
+      analyser.getFloatTimeDomainData(meterArray);
+      let peak = 0;
+      for (let i = 0; i < meterArray.length; i++) {
+        const v = Math.abs(meterArray[i]);
+        if (v > peak) peak = v;
+      }
+      return peak;
+    }
+
+    function getActiveNoteCount() {
+      if (!engine?.liveNodes) return 0;
+      let count = 0;
+      const ks = engine.liveNodes.get("__ksVoices__");
+      if (ks && typeof ks === "object") {
+        for (const chMap of Object.values(ks)) count += Object.keys(chMap || {}).length;
+      }
+      const osc = engine.liveNodes.get("__oscVoices__");
+      if (osc && typeof osc === "object") {
+        for (const chMap of Object.values(osc)) count += Object.keys(chMap || {}).length;
+      }
+      return count;
+    }
+
+    function noteOn(note, vel, ch = 0) {
+      synth.send([0x90 | (ch & 0x0f), note & 0x7f, vel & 0x7f], ctx.currentTime);
+    }
+
+    function noteOff(note, ch = 0) {
+      synth.send([0x80 | (ch & 0x0f), note & 0x7f, 0], ctx.currentTime);
+    }
+
+    function stopAllNotes() {
+      if (!synth || !ctx) return;
+      for (let ch = 0; ch < 16; ch++) {
+        synth.send([0xB0 | ch, 123, 0], ctx.currentTime);
+        synth.send([0xB0 | ch, 120, 0], ctx.currentTime);
+      }
+    }
+
+    async function waitForQuiet(maxMs = 4000, quietThreshold = 0.001) {
+      const start = performance.now();
+      let quietStart = 0;
+      while (performance.now() - start < maxMs) {
+        const active = getActiveNoteCount();
+        const peak = readPeakAbs();
+        if (active === 0 && peak < quietThreshold) {
+          if (!quietStart) quietStart = performance.now();
+          if (performance.now() - quietStart >= 250) return true;
+        } else {
+          quietStart = 0;
+        }
+        await new Promise(r => setTimeout(r, 40));
+      }
+      return false;
+    }
+
+    async function measureSingleLatency() {
+      if (!ctx || !synth || !engine || !analyser) throw new Error("尚未初始化");
+      if (isMeasuring) throw new Error("量測進行中");
+      stopDetectLoop();
+      stopPolyStress();
+      setBusy(true);
+      isMeasuring = true;
+      const myToken = ++detectToken;
+
+      try {
+        await ensureResumed();
+        stopAllNotes();
+        await waitForQuiet();
+
+        const threshold = Number(el.thresholdInput.value) || 0.003;
+        const timeoutMs = Number(el.timeoutInput.value) || 2500;
+        const noteDurationMs = Number(el.noteDurationInput.value) || 10000;
+        const testNote = 60;
+        const testVel = 70;
+
+        const t0Perf = performance.now();
+        const t0Ctx = ctx.currentTime;
+        let peak = 0;
+        let detected = false;
+        let t1Perf = null;
+        let t1Ctx = null;
+
+        noteOn(testNote, testVel);
+        window.setTimeout(() => noteOff(testNote), Math.min(noteDurationMs, 1200));
+
+        await new Promise((resolve) => {
+          const tick = () => {
+            if (myToken !== detectToken) return resolve();
+            peak = readPeakAbs();
+            const nowPerf = performance.now();
+            if (peak >= threshold) {
+              detected = true;
+              t1Perf = nowPerf;
+              t1Ctx = ctx.currentTime;
+              return resolve();
+            }
+            if (nowPerf - t0Perf >= timeoutMs) return resolve();
+            detectRAF = requestAnimationFrame(tick);
+          };
+          detectRAF = requestAnimationFrame(tick);
+        });
+
+        const result = {
+          detected,
+          peak,
+          perfMs: detected && t1Perf != null ? (t1Perf - t0Perf) : null,
+          ctxMs: detected && t1Ctx != null ? (t1Ctx - t0Ctx) * 1000 : null,
+          threshold,
+          browser: browserName(),
+          voices: getActiveNoteCount(),
+        };
+        lastStats = { single: result };
+        el.lastResult.textContent = detected ? `ctx ${result.ctxMs.toFixed(2)} ms / perf ${result.perfMs.toFixed(2)} ms` : "timeout";
+        log(
+          "單音測試完成",
+          `detected: ${detected}`,
+          `ctx: ${fmtMs(result.ctxMs)}`,
+          `perf: ${fmtMs(result.perfMs)}`,
+          `peak: ${peak.toFixed(4)}`,
+          `threshold: ${threshold}`
+        );
+        return result;
+      } finally {
+        stopDetectLoop();
+        setBusy(false);
+      }
+    }
+
+    async function autoMeasure() {
+      const count = Math.max(1, Number(el.repeatCountInput.value) || 10);
+      const ctxValues = [];
+      const perfValues = [];
+      for (let i = 0; i < count; i++) {
+        const r = await measureSingleLatency();
+        if (typeof r.ctxMs === "number") ctxValues.push(r.ctxMs);
+        if (typeof r.perfMs === "number") perfValues.push(r.perfMs);
+        await waitForQuiet();
+        await new Promise(r => setTimeout(r, 180));
+      }
+
+      const stats = {
+        type: "latency",
+        browser: browserName(),
+        voices: 1,
+        refresh: "-",
+        ctxMean: mean(ctxValues),
+        ctxMedian: median(ctxValues),
+        ctxMin: min(ctxValues),
+        ctxMax: max(ctxValues),
+        perfMean: mean(perfValues),
+        perfMedian: median(perfValues),
+        count,
+      };
+      lastStats = stats;
+      el.lastResult.textContent = `median ${fmtMs(stats.ctxMedian)} / mean ${fmtMs(stats.ctxMean)}`;
+      log(
+        `自動測試完成 (${count} 次)`,
+        `ctx mean: ${fmtMs(stats.ctxMean)}`,
+        `ctx median: ${fmtMs(stats.ctxMedian)}`,
+        `ctx min/max: ${fmtMs(stats.ctxMin)} / ${fmtMs(stats.ctxMax)}`,
+        `perf mean: ${fmtMs(stats.perfMean)}`,
+        `perf median: ${fmtMs(stats.perfMedian)}`,
+      );
+    }
+
+    function makeStressNote(index) {
+      return notePalette[index % notePalette.length];
+    }
+
+    async function startPolyStress() {
+      if (!ctx || !synth || !engine) throw new Error("尚未初始化");
+      stopPolyStress();
+      await ensureResumed();
+      stopAllNotes();
+      await waitForQuiet();
+
+      const target = Number(el.polySelect.value) || 4;
+      const refresh = Number(el.refreshSelect.value) || 1000;
+      stressVoices = [];
+      stressCursor = 0;
+
+      for (let i = 0; i < target; i++) {
+        const note = makeStressNote(i);
+        const vel = 70;
+        noteOn(note, vel);
+        stressVoices.push({ note, vel });
+      }
+
+      polyTimer = window.setInterval(() => {
+        if (!stressVoices.length) return;
+        const idx = stressCursor % stressVoices.length;
+        const oldVoice = stressVoices[idx];
+        if (oldVoice) noteOff(oldVoice.note);
+
+        const newNote = makeStressNote(target + stressCursor + 1);
+        const vel = 70;
+        noteOn(newNote, vel);
+        stressVoices[idx] = { note: newNote, vel };
+        stressCursor += 1;
+      }, refresh);
+
+      log(
+        "poly stress 已開始",
+        `target voices: ${target}`,
+        `refresh interval: ${refresh} ms`,
+        "active voices 會維持接近目標值（steady-state polyphony）"
+      );
+    }
+
+    function stopPolyStress() {
+      if (polyTimer) {
+        clearInterval(polyTimer);
+        polyTimer = 0;
+      }
+      if (stressVoices.length) {
+        for (const v of stressVoices) noteOff(v.note);
+      }
+      stressVoices = [];
+    }
+
+    function saveCurrentRow() {
+      const row = {
+        type: lastStats?.type || "manual",
+        browser: browserName(),
+        voices: Number(el.polySelect.value) || null,
+        refresh: `${Number(el.refreshSelect.value) || 0} ms`,
+        ctxMean: lastStats?.ctxMean ?? lastStats?.single?.ctxMs ?? null,
+        ctxMedian: lastStats?.ctxMedian ?? lastStats?.single?.ctxMs ?? null,
+        ctxMin: lastStats?.ctxMin ?? lastStats?.single?.ctxMs ?? null,
+        ctxMax: lastStats?.ctxMax ?? lastStats?.single?.ctxMs ?? null,
+        cpu: el.cpuInput.value.trim(),
+        stability: el.stabilitySelect.value,
+      };
+      savedRows.push(row);
+      renderRows();
+    }
+
+    function renderRows() {
+      el.resultsBody.innerHTML = "";
+      for (const row of savedRows) {
+        const tr = document.createElement("tr");
+        const cells = [
+          row.type, row.browser, row.voices ?? "", row.refresh ?? "",
+          row.ctxMean == null ? "" : row.ctxMean.toFixed(2),
+          row.ctxMedian == null ? "" : row.ctxMedian.toFixed(2),
+          row.ctxMin == null ? "" : row.ctxMin.toFixed(2),
+          row.ctxMax == null ? "" : row.ctxMax.toFixed(2),
+          row.cpu, row.stability,
+        ];
+        for (const c of cells) {
+          const td = document.createElement("td");
+          td.textContent = String(c);
+          tr.appendChild(td);
+        }
+        el.resultsBody.appendChild(tr);
+      }
+    }
+
+    function exportJSON() {
+      const payload = {
+        browser: browserName(),
+        baseLatency: ctx?.baseLatency ?? null,
+        outputLatency: ctx?.outputLatency ?? null,
+        rows: savedRows,
+        lastStats,
+      };
+      downloadBlob(JSON.stringify(payload, null, 2), "application/json", "latency_poly_results.json");
+    }
+
+    function exportCSV() {
+      const header = ["type","browser","voices","refresh","ctxMean","ctxMedian","ctxMin","ctxMax","cpu","stability"];
+      const lines = [header.join(",")];
+      for (const row of savedRows) {
+        lines.push([
+          row.type, row.browser, row.voices ?? "", row.refresh ?? "",
+          row.ctxMean ?? "", row.ctxMedian ?? "", row.ctxMin ?? "", row.ctxMax ?? "",
+          row.cpu ?? "", row.stability ?? ""
+        ].map(csvCell).join(","));
+      }
+      downloadBlob(lines.join("\n"), "text/csv;charset=utf-8", "latency_poly_results.csv");
+    }
+
+    function csvCell(v) {
+      const s = String(v ?? "");
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    }
+
+    function downloadBlob(text, type, filename) {
+      const blob = new Blob([text], { type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    el.initBtn.addEventListener("click", initAudio);
+    el.reloadPresetBtn.addEventListener("click", async () => {
+      try {
+        await loadPreset();
+        log("preset 重新載入完成", el.presetUrl.value.trim());
+      } catch (err) {
+        log("preset 重新載入失敗", String(err?.message || err));
+      }
+    });
+    el.stopAllBtn.addEventListener("click", async () => {
+      stopDetectLoop();
+      stopPolyStress();
+      stopAllNotes();
+      await waitForQuiet();
+      log("已停止所有音與 poly stress");
+    });
+    el.singleTestBtn.addEventListener("click", async () => {
+      try { await measureSingleLatency(); } catch (err) { log("單音測試失敗", String(err?.message || err)); }
+    });
+    el.autoTestBtn.addEventListener("click", async () => {
+      try { await autoMeasure(); } catch (err) { log("自動測試失敗", String(err?.message || err)); }
+    });
+    el.cancelMeasureBtn.addEventListener("click", () => {
+      stopDetectLoop();
+      log("已取消量測");
+    });
+    el.startPolyBtn.addEventListener("click", async () => {
+      try { await startPolyStress(); } catch (err) { log("poly stress 啟動失敗", String(err?.message || err)); }
+    });
+    el.stopPolyBtn.addEventListener("click", async () => {
+      stopPolyStress();
+      stopAllNotes();
+      await waitForQuiet();
+      log("poly stress 已停止");
+    });
+    el.saveRowBtn.addEventListener("click", saveCurrentRow);
+    el.clearRowsBtn.addEventListener("click", () => { savedRows = []; renderRows(); });
+    el.exportJsonBtn.addEventListener("click", exportJSON);
+    el.exportCsvBtn.addEventListener("click", exportCSV);
+
+    window.addEventListener("beforeunload", () => {
+      stopDetectLoop();
+      stopPolyStress();
+      if (meterTimer) clearInterval(meterTimer);
+    });
+  </script>
+</body>
+</html>

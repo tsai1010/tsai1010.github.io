@@ -1,0 +1,845 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Synth Latency / Poly Test</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1115;
+      --panel: #181c23;
+      --panel-2: #141821;
+      --line: #2b3342;
+      --text: #eef3fb;
+      --muted: #a9b4c6;
+      --accent: #7cc4ff;
+      --accent-2: #173149;
+      --good: #8ce99a;
+      --warn: #ffd166;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100svh;
+      padding: 16px;
+    }
+    .wrap { width: min(100%, 1100px); margin: 0 auto; display: grid; gap: 14px; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 16px;
+      box-shadow: 0 12px 36px rgba(0,0,0,.22);
+    }
+    h1, h2, h3 { margin: 0 0 10px; }
+    h1 { font-size: 1.35rem; }
+    h2 { font-size: 1.05rem; }
+    p { margin: 0; color: var(--muted); line-height: 1.55; }
+    .metrics, .controls {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+    .controls { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .metric {
+      background: rgba(255,255,255,.02);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px;
+    }
+    .label { color: var(--muted); font-size: .9rem; margin-bottom: 6px; }
+    .value { font-weight: 700; font-size: 1.02rem; word-break: break-word; }
+    .row {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      align-items: end;
+      margin-top: 12px;
+    }
+    .field { grid-column: span 3; }
+    .field.wide { grid-column: span 6; }
+    .field.full { grid-column: 1 / -1; }
+    label { display: block; margin-bottom: 6px; color: var(--muted); font-size: .92rem; }
+    input, select, textarea, button {
+      width: 100%;
+      font: inherit;
+      color: var(--text);
+      background: var(--panel-2);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+    }
+    textarea { min-height: 88px; resize: vertical; }
+    button { cursor: pointer; font-weight: 700; touch-action: manipulation; }
+    button.accent { background: var(--accent-2); color: var(--accent); border-color: #31597a; }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    .button-row {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-top: 12px;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+      line-height: 1.55;
+      font-size: .92rem;
+    }
+    table {
+      width: 100%; border-collapse: collapse; overflow: hidden; border-radius: 14px;
+      border: 1px solid var(--line); margin-top: 10px;
+    }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; font-size: .92rem; }
+    th { color: var(--muted); background: rgba(255,255,255,.03); }
+    tr:last-child td { border-bottom: 0; }
+    .hint { margin-top: 8px; font-size: .9rem; color: var(--muted); }
+    .status { color: var(--good); }
+    .warn { color: var(--warn); }
+    @media (max-width: 860px) {
+      .metrics, .controls, .button-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .field, .field.wide { grid-column: span 6; }
+    }
+    @media (max-width: 560px) {
+      .metrics, .controls, .button-row { grid-template-columns: 1fr; }
+      .field, .field.wide, .field.full { grid-column: 1 / -1; }
+      body { padding: 10px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="panel">
+      <h1>Synth Latency / Polyphony Test</h1>
+      <p>
+        這頁會用你的 synth 建立固定測試路徑，並從最後一個 <b>analyzer</b> 模組讀取 onset，
+        量 <b>synth.send() → graph onset</b> 的 estimated latency。<br>
+        若你要載入自己的 preset，請把下方 <b>PRESET_URL</b> 改成你的 JSON 路徑，且確保 preset 最後保留一個 analyzer。
+      </p>
+
+      <div class="metrics" style="margin-top:12px;">
+        <div class="metric"><div class="label">baseLatency</div><div class="value" id="baseLatency">--</div></div>
+        <div class="metric"><div class="label">outputLatency</div><div class="value" id="outputLatency">--</div></div>
+        <div class="metric"><div class="label">estimated send→graph</div><div class="value" id="estimatedLatency">--</div></div>
+        <div class="metric"><div class="label">AudioContext state</div><div class="value" id="ctxState">--</div></div>
+      </div>
+
+      <div class="metrics" style="margin-top:10px;">
+        <div class="metric"><div class="label">sampleRate</div><div class="value" id="sampleRate">--</div></div>
+        <div class="metric"><div class="label">target poly</div><div class="value" id="targetPoly">--</div></div>
+        <div class="metric"><div class="label">active notes</div><div class="value" id="activeNotes">--</div></div>
+        <div class="metric"><div class="label">refresh interval</div><div class="value" id="refreshValue">--</div></div>
+      </div>
+
+      <div class="row">
+        <div class="field wide">
+          <label for="presetUrl">PRESET_URL</label>
+          <input id="presetUrl" value="./presets/Latency.json" />
+        </div>
+        <div class="field">
+          <label for="polySelect">Poly</label>
+          <select id="polySelect">
+            <option>4</option>
+            <option>8</option>
+            <option selected>16</option>
+            <option>32</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="refreshSelect">Refresh interval</label>
+          <select id="refreshSelect">
+            <option value="500">Fast · 500 ms</option>
+            <option value="1000" selected>Medium · 1000 ms</option>
+            <option value="2000">Slow · 2000 ms</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="noteDurationMs">Note duration (ms)</label>
+          <input id="noteDurationMs" type="number" min="100" step="100" value="10000" />
+        </div>
+        <div class="field">
+          <label for="thresholdInput">Onset threshold</label>
+          <input id="thresholdInput" type="number" min="0.0001" max="1" step="0.0001" value="0.003" />
+        </div>
+        <div class="field">
+          <label for="measureTimeoutMs">Measure timeout (ms)</label>
+          <input id="measureTimeoutMs" type="number" min="50" step="50" value="2500" />
+        </div>
+        <div class="field">
+          <label for="repeatCount">Auto repeat count</label>
+          <input id="repeatCount" type="number" min="3" max="30" step="1" value="10" />
+        </div>
+        <div class="field">
+          <label for="sweepDurationMs">Sweep step duration (ms)</label>
+          <input id="sweepDurationMs" type="number" min="500" step="500" value="8000" />
+        </div>
+        <div class="field">
+          <label for="cpuUsageInput">CPU usage (%) 手動填</label>
+          <input id="cpuUsageInput" type="number" min="0" max="100" step="0.1" placeholder="例如 32.5" />
+        </div>
+        <div class="field">
+          <label for="stabilitySelect">Playback stability</label>
+          <select id="stabilitySelect">
+            <option value="Stable" selected>Stable</option>
+            <option value="Minor glitches">Minor glitches</option>
+            <option value="Unstable">Unstable</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="button-row">
+        <button class="accent" id="initBtn">1. 初始化音訊</button>
+        <button id="measureBtn" disabled>2. 單次 latency 測試</button>
+        <button id="measureBatchBtn" disabled>2b. 自動多次測試</button>
+        <button id="startStressBtn" disabled>3. 開始 poly stress</button>
+        <button id="stopStressBtn" disabled>停止 stress</button>
+        <button id="saveRowBtn" disabled>儲存目前結果</button>
+        <button id="runSweepBtn" disabled>自動 sweep 4 / 8 / 16 / 32</button>
+        <button id="exportJsonBtn" disabled>匯出 JSON</button>
+        <button id="exportCsvBtn" disabled>匯出 CSV</button>
+      </div>
+
+      <div class="hint">
+        建議流程：初始化音訊 → 單次 latency 測試 → 開始 poly stress → 觀察 CPU / 穩定性 → 儲存結果。
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Results</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Poly</th>
+            <th>Refresh (ms)</th>
+            <th>Note dur (ms)</th>
+            <th>Estimated latency (ms)</th>
+            <th>baseLatency (ms)</th>
+            <th>outputLatency (ms)</th>
+            <th>CPU (%)</th>
+            <th>Stability</th>
+            <th>UA</th>
+          </tr>
+        </thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2>Log</h2>
+      <div class="mono" id="log">等待初始化…</div>
+    </section>
+  </main>
+
+  <script type="module">
+    import MidiSynth from "https://tsai1010.github.io/scripts/midisynth-gui.js";
+
+    const DEFAULT_STATE = {
+      chains: [[
+        {
+          id: "ks_1",
+          kind: "ks_source",
+          enabled: true,
+          params: {
+            ch: "all",
+            program: "all",
+            smoothingMode: "auto",
+            smoothingFactor: 0.2,
+            velScale: 1.0,
+            ksDurSec: 10.0,
+            ksRelease: 0.35,
+            seedNoiseType: "pink"
+          }
+        },
+        {
+          id: "gain_1",
+          kind: "gain",
+          enabled: true,
+          params: { gain: 0.9 }
+        },
+        {
+          id: "an_1",
+          kind: "analyzer",
+          enabled: true,
+          params: {}
+        }
+      ]],
+      chainMeta: [{ name: "Latency Test", locked: true }],
+      mutes: [false]
+    };
+
+    const POLY_OPTIONS = [4, 8, 16, 32];
+    const NOTE_POOL = [48, 50, 52, 53, 55, 57, 59, 60, 62, 64, 65, 67, 69, 71, 72, 74, 76, 77, 79, 81, 83, 84, 86, 88, 89, 91, 93, 95, 96, 98, 100, 101];
+
+    const $ = (id) => document.getElementById(id);
+    const el = {
+      presetUrl: $("presetUrl"),
+      polySelect: $("polySelect"),
+      refreshSelect: $("refreshSelect"),
+      noteDurationMs: $("noteDurationMs"),
+      thresholdInput: $("thresholdInput"),
+      measureTimeoutMs: $("measureTimeoutMs"),
+      repeatCount: $("repeatCount"),
+      sweepDurationMs: $("sweepDurationMs"),
+      cpuUsageInput: $("cpuUsageInput"),
+      stabilitySelect: $("stabilitySelect"),
+      initBtn: $("initBtn"),
+      measureBtn: $("measureBtn"),
+      measureBatchBtn: $("measureBatchBtn"),
+      startStressBtn: $("startStressBtn"),
+      stopStressBtn: $("stopStressBtn"),
+      saveRowBtn: $("saveRowBtn"),
+      runSweepBtn: $("runSweepBtn"),
+      exportJsonBtn: $("exportJsonBtn"),
+      exportCsvBtn: $("exportCsvBtn"),
+      baseLatency: $("baseLatency"),
+      outputLatency: $("outputLatency"),
+      estimatedLatency: $("estimatedLatency"),
+      ctxState: $("ctxState"),
+      sampleRate: $("sampleRate"),
+      targetPoly: $("targetPoly"),
+      activeNotes: $("activeNotes"),
+      refreshValue: $("refreshValue"),
+      resultsBody: $("resultsBody"),
+      log: $("log"),
+    };
+
+    let ctx = null;
+    let synth = null;
+    let engine = null;
+    let analyser = null;
+    let floatBuf = null;
+    let isStressRunning = false;
+    let stressTimer = null;
+    let activeNotes = [];
+    let rotateIndex = 0;
+    let lastMeasurement = null;
+    let lastBatchMeasurement = null;
+    let measureRafId = 0;
+    let measureToken = 0;
+    let isMeasuring = false;
+    const results = [];
+
+    function log(...args) {
+      const text = args.map(v => typeof v === "string" ? v : JSON.stringify(v, null, 2)).join("\n");
+      el.log.textContent = text;
+    }
+
+    function fmtMs(ms) {
+      if (typeof ms !== "number" || Number.isNaN(ms)) return "--";
+      return `${ms.toFixed(2)} ms`;
+    }
+
+    function fmtLatencySeconds(value) {
+      if (typeof value !== "number" || Number.isNaN(value)) return "不支援";
+      return `${value.toFixed(6)} s (${(value * 1000).toFixed(2)} ms)`;
+    }
+
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    function downloadText(filename, text, type = "text/plain;charset=utf-8") {
+      const blob = new Blob([text], { type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function getBaseLatencyMs() {
+      return typeof ctx?.baseLatency === "number" ? ctx.baseLatency * 1000 : null;
+    }
+
+    function getOutputLatencyMs() {
+      return typeof ctx?.outputLatency === "number" ? ctx.outputLatency * 1000 : null;
+    }
+
+    function cancelMeasureLoop() {
+      measureToken += 1;
+      if (measureRafId) {
+        cancelAnimationFrame(measureRafId);
+        measureRafId = 0;
+      }
+      isMeasuring = false;
+    }
+
+    function setMeasureButtonsDisabled(disabled) {
+      el.measureBtn.disabled = disabled;
+      el.measureBatchBtn.disabled = disabled;
+      el.startStressBtn.disabled = disabled || !ctx;
+      el.runSweepBtn.disabled = disabled || !ctx;
+    }
+
+    function updateMetrics() {
+      el.baseLatency.textContent = fmtLatencySeconds(ctx?.baseLatency);
+      el.outputLatency.textContent = fmtLatencySeconds(ctx?.outputLatency);
+      el.ctxState.textContent = ctx?.state ?? "--";
+      el.sampleRate.textContent = ctx ? `${ctx.sampleRate} Hz` : "--";
+      el.targetPoly.textContent = `${Number(el.polySelect.value) || 0}`;
+      el.activeNotes.textContent = `${activeNotes.length}`;
+      el.refreshValue.textContent = `${Number(el.refreshSelect.value) || 0} ms`;
+      if (lastMeasurement?.estimatedLatencyMs != null) {
+        el.estimatedLatency.textContent = fmtMs(lastMeasurement.estimatedLatencyMs);
+      }
+    }
+
+    async function ensureResumed() {
+      if (ctx?.state === "suspended") await ctx.resume();
+      if (synth?.actx?.state === "suspended") await synth.actx.resume();
+    }
+
+    async function initAudio() {
+      try {
+        if (!ctx) {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          ctx = new Ctx();
+          synth = new window.MidiSynth();
+          synth.setAudioContext(ctx, ctx.destination);
+
+          const presetUrl = el.presetUrl.value.trim();
+          const options = {
+            showButton: false,
+            tailwind: false,
+            initialState: DEFAULT_STATE,
+          };
+
+          if (presetUrl && presetUrl !== "./your-preset.json") {
+            options.loadURL = presetUrl;
+          }
+
+          await synth.enableRoutingComposer(options);
+          engine = window.__RC_HANDLE__?.engine || synth.audioEngine || synth.engine || null;
+          analyser = engine?.analyser || null;
+          if (!analyser) {
+            throw new Error("找不到 engine.analyser。請確認 preset 最後保留 analyzer。");
+          }
+          analyser.fftSize = 2048;
+          floatBuf = new Float32Array(analyser.fftSize);
+
+          window.testSynth = synth;
+          window.testAudioContext = ctx;
+          window.testEngine = engine;
+        }
+
+        await ensureResumed();
+        updateMetrics();
+        setMeasureButtonsDisabled(false);
+        el.saveRowBtn.disabled = false;
+        el.exportJsonBtn.disabled = false;
+        el.exportCsvBtn.disabled = false;
+
+        log(
+          "初始化完成",
+          `baseLatency: ${fmtLatencySeconds(ctx.baseLatency)}`,
+          `outputLatency: ${fmtLatencySeconds(ctx.outputLatency)}`,
+          `sampleRate: ${ctx.sampleRate} Hz`,
+          `state: ${ctx.state}`,
+          analyser ? "analyser: ready" : "analyser: missing"
+        );
+      } catch (err) {
+        console.error(err);
+        log("初始化失敗", String(err?.message || err));
+      }
+    }
+
+    function noteOn(note, velocity = 100) {
+      synth.send([0x90, note & 0x7f, velocity & 0x7f], ctx.currentTime);
+    }
+
+    function noteOff(note) {
+      synth.send([0x80, note & 0x7f, 0], ctx.currentTime);
+    }
+
+    function nextNoteFromPool() {
+      const note = NOTE_POOL[rotateIndex % NOTE_POOL.length];
+      rotateIndex += 1;
+      return note;
+    }
+
+    function stopAllActiveNotes() {
+      for (const note of activeNotes) noteOff(note);
+      activeNotes = [];
+      updateMetrics();
+    }
+
+    function readPeakAbs() {
+      if (!analyser || !floatBuf) return 0;
+      analyser.getFloatTimeDomainData(floatBuf);
+      let peak = 0;
+      for (let i = 0; i < floatBuf.length; i++) {
+        const v = Math.abs(floatBuf[i]);
+        if (v > peak) peak = v;
+      }
+      return peak;
+    }
+
+    async function measureEstimatedLatency({ silentLog = false } = {}) {
+      if (!synth || !ctx || !analyser) throw new Error("音訊尚未初始化");
+      await ensureResumed();
+      cancelMeasureLoop();
+      isMeasuring = true;
+      setMeasureButtonsDisabled(true);
+      stopAllActiveNotes();
+      await sleep(50);
+
+      const threshold = Number(el.thresholdInput.value) || 0.003;
+      const timeoutMs = Number(el.measureTimeoutMs.value) || 2500;
+      const noteDurationMs = Number(el.noteDurationMs.value) || 10000;
+      const testNote = 60;
+      const testVelocity = 70;
+      const token = ++measureToken;
+
+      const t0Perf = performance.now();
+      const t0Ctx = ctx.currentTime;
+      noteOn(testNote, testVelocity);
+      activeNotes.push(testNote);
+      updateMetrics();
+
+      let peak = 0;
+      let detected = false;
+      let t1Perf = null;
+      let t1Ctx = null;
+
+      try {
+        await new Promise((resolve) => {
+          function finish() {
+            if (measureRafId) {
+              cancelAnimationFrame(measureRafId);
+              measureRafId = 0;
+            }
+            resolve();
+          }
+          function tick() {
+            if (token !== measureToken) return finish();
+            peak = readPeakAbs();
+            if (peak >= threshold) {
+              detected = true;
+              t1Perf = performance.now();
+              t1Ctx = ctx.currentTime;
+              return finish();
+            }
+            if (performance.now() - t0Perf >= timeoutMs) {
+              return finish();
+            }
+            measureRafId = requestAnimationFrame(tick);
+          }
+          measureRafId = requestAnimationFrame(tick);
+        });
+      } finally {
+        window.setTimeout(() => {
+          noteOff(testNote);
+          activeNotes = activeNotes.filter(n => n !== testNote);
+          updateMetrics();
+        }, Math.min(noteDurationMs, 1200));
+      }
+
+      const result = {
+        estimatedLatencyMs: detected && t1Ctx != null ? (t1Ctx - t0Ctx) * 1000 : null,
+        estimatedLatencyPerfMs: detected && t1Perf != null ? (t1Perf - t0Perf) : null,
+        threshold,
+        peak,
+        timeoutMs,
+        detected,
+        testNote,
+        testVelocity,
+        baseLatencyMs: getBaseLatencyMs(),
+        outputLatencyMs: getOutputLatencyMs(),
+        sampleRate: ctx.sampleRate,
+        ctxState: ctx.state,
+      };
+
+      lastMeasurement = result;
+      updateMetrics();
+      isMeasuring = false;
+      setMeasureButtonsDisabled(false);
+
+      if (!silentLog) {
+        log(
+          detected ? "單次 latency 測試完成" : "單次 latency 測試逾時",
+          `test note: ${testNote}`,
+          `velocity: ${testVelocity}`,
+          `estimated (ctx): ${fmtMs(result.estimatedLatencyMs)}`,
+          `estimated (perf): ${fmtMs(result.estimatedLatencyPerfMs)}`,
+          `threshold: ${threshold}`,
+          `peak: ${peak.toFixed(6)}`,
+          `baseLatency: ${fmtMs(result.baseLatencyMs)}`,
+          `outputLatency: ${fmtMs(result.outputLatencyMs)}`
+        );
+      }
+
+      return result;
+    }
+
+    function calcStats(values) {
+      const nums = values.filter(v => typeof v === "number" && !Number.isNaN(v));
+      if (!nums.length) return null;
+      const sorted = [...nums].sort((a, b) => a - b);
+      const mean = nums.reduce((a, b) => a + b, 0) / nums.length;
+      const mid = Math.floor(sorted.length / 2);
+      const median = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+      return {
+        count: nums.length,
+        mean,
+        median,
+        min: sorted[0],
+        max: sorted[sorted.length - 1],
+      };
+    }
+
+    async function measureRepeatedLatency() {
+      const repeatCount = Math.max(3, Math.min(30, Number(el.repeatCount.value) || 10));
+      const noteDurationMs = Number(el.noteDurationMs.value) || 10000;
+      const cooldownMs = Math.min(noteDurationMs, 1200) + 450;
+      const rows = [];
+
+      setMeasureButtonsDisabled(true);
+      try {
+        log(`開始自動測試 ${repeatCount} 次`, `每次間隔: ${cooldownMs} ms`, "建議正式取 10 次；若要更穩可用 15 次。 ");
+        for (let i = 0; i < repeatCount; i++) {
+          const result = await measureEstimatedLatency({ silentLog: true });
+          rows.push(result);
+          log(
+            `自動測試進行中 ${i + 1}/${repeatCount}`,
+            `本次 estimated (ctx): ${fmtMs(result.estimatedLatencyMs)}`,
+            `本次 estimated (perf): ${fmtMs(result.estimatedLatencyPerfMs)}`
+          );
+          if (i < repeatCount - 1) await sleep(cooldownMs);
+        }
+      } finally {
+        setMeasureButtonsDisabled(false);
+      }
+
+      const ctxStats = calcStats(rows.map(r => r.estimatedLatencyMs));
+      const perfStats = calcStats(rows.map(r => r.estimatedLatencyPerfMs));
+      lastBatchMeasurement = {
+        repeatCount,
+        cooldownMs,
+        ctxStats,
+        perfStats,
+        timestamp: new Date().toISOString(),
+      };
+
+      log(
+        `自動測試完成，共 ${repeatCount} 次`,
+        ctxStats ? `ctx mean: ${fmtMs(ctxStats.mean)} | median: ${fmtMs(ctxStats.median)} | min: ${fmtMs(ctxStats.min)} | max: ${fmtMs(ctxStats.max)}` : "ctx: 無有效資料",
+        perfStats ? `perf mean: ${fmtMs(perfStats.mean)} | median: ${fmtMs(perfStats.median)} | min: ${fmtMs(perfStats.min)} | max: ${fmtMs(perfStats.max)}` : "perf: 無有效資料",
+        "建議論文主報 median，並附上 min/max 或平均值作補充。"
+      );
+
+      return lastBatchMeasurement;
+    }
+
+    async function startPolyStress() {
+      if (!synth || !ctx) throw new Error("音訊尚未初始化");
+      await ensureResumed();
+      stopPolyStress();
+
+      const poly = Number(el.polySelect.value) || 4;
+      const refreshMs = Number(el.refreshSelect.value) || 1000;
+      const noteDurationMs = Number(el.noteDurationMs.value) || 10000;
+
+      synth.voices = poly;
+      activeNotes = [];
+      rotateIndex = 0;
+
+      for (let i = 0; i < poly; i++) {
+        const note = nextNoteFromPool();
+        noteOn(note, 100);
+        activeNotes.push(note);
+      }
+
+      isStressRunning = true;
+      el.stopStressBtn.disabled = false;
+      updateMetrics();
+
+      stressTimer = window.setInterval(() => {
+        if (!isStressRunning) return;
+        const replaceCount = Math.max(1, Math.ceil(poly / 8));
+        for (let i = 0; i < replaceCount; i++) {
+          const oldNote = activeNotes.shift();
+          if (typeof oldNote === "number") noteOff(oldNote);
+          const newNote = nextNoteFromPool();
+          noteOn(newNote, 100);
+          activeNotes.push(newNote);
+          window.setTimeout(() => noteOff(newNote), noteDurationMs);
+        }
+        while (activeNotes.length > poly) activeNotes.shift();
+        updateMetrics();
+      }, refreshMs);
+
+      log(
+        "poly stress 已開始",
+        `poly: ${poly}`,
+        `refresh interval: ${refreshMs} ms`,
+        `note duration: ${noteDurationMs} ms`,
+        "現在可以手動觀察 CPU usage 與穩定性。"
+      );
+    }
+
+    function stopPolyStress() {
+      isStressRunning = false;
+      if (stressTimer) {
+        clearInterval(stressTimer);
+        stressTimer = null;
+      }
+      stopAllActiveNotes();
+      el.stopStressBtn.disabled = true;
+      updateMetrics();
+    }
+
+    function buildRowObject(extra = {}) {
+      return {
+        index: results.length + 1,
+        poly: Number(el.polySelect.value) || null,
+        refreshMs: Number(el.refreshSelect.value) || null,
+        noteDurationMs: Number(el.noteDurationMs.value) || null,
+        estimatedLatencyMs: lastMeasurement?.estimatedLatencyMs ?? null,
+        estimatedLatencyPerfMs: lastMeasurement?.estimatedLatencyPerfMs ?? null,
+        baseLatencyMs: getBaseLatencyMs(),
+        outputLatencyMs: getOutputLatencyMs(),
+        cpuUsagePercent: el.cpuUsageInput.value === "" ? null : Number(el.cpuUsageInput.value),
+        stability: el.stabilitySelect.value,
+        threshold: Number(el.thresholdInput.value) || null,
+        userAgent: navigator.userAgent,
+        timestamp: new Date().toISOString(),
+        ...extra,
+      };
+    }
+
+    function renderResults() {
+      el.resultsBody.innerHTML = results.map((row, idx) => `
+        <tr>
+          <td>${idx + 1}</td>
+          <td>${escapeHtml(row.poly ?? "")}</td>
+          <td>${escapeHtml(row.refreshMs ?? "")}</td>
+          <td>${escapeHtml(row.noteDurationMs ?? "")}</td>
+          <td>${escapeHtml(row.estimatedLatencyMs == null ? "" : row.estimatedLatencyMs.toFixed(2))}</td>
+          <td>${escapeHtml(row.baseLatencyMs == null ? "" : row.baseLatencyMs.toFixed(2))}</td>
+          <td>${escapeHtml(row.outputLatencyMs == null ? "" : row.outputLatencyMs.toFixed(2))}</td>
+          <td>${escapeHtml(row.cpuUsagePercent ?? "")}</td>
+          <td>${escapeHtml(row.stability ?? "")}</td>
+          <td>${escapeHtml((row.userAgent || "").slice(0, 72))}</td>
+        </tr>
+      `).join("");
+    }
+
+    function saveCurrentRow(extra = {}) {
+      const row = buildRowObject(extra);
+      results.push(row);
+      renderResults();
+      log("已儲存結果", row);
+    }
+
+    async function runSweep() {
+      try {
+        if (!ctx || !synth) throw new Error("請先初始化音訊");
+        el.runSweepBtn.disabled = true;
+        const originalPoly = el.polySelect.value;
+        const stepDurationMs = Number(el.sweepDurationMs.value) || 8000;
+
+        for (const poly of POLY_OPTIONS) {
+          el.polySelect.value = String(poly);
+          updateMetrics();
+          await measureEstimatedLatency();
+          await startPolyStress();
+          await sleep(stepDurationMs);
+          saveCurrentRow({ autoSweep: true, cpuUsagePercent: null, stability: "Manual after sweep" });
+          stopPolyStress();
+          await sleep(500);
+        }
+
+        el.polySelect.value = originalPoly;
+        updateMetrics();
+        log("自動 sweep 完成", `共新增 ${POLY_OPTIONS.length} 筆結果。`);
+      } catch (err) {
+        console.error(err);
+        log("自動 sweep 失敗", String(err?.message || err));
+      } finally {
+        el.runSweepBtn.disabled = false;
+      }
+    }
+
+    function exportJson() {
+      downloadText("latency-poly-results.json", JSON.stringify(results, null, 2), "application/json;charset=utf-8");
+    }
+
+    function exportCsv() {
+      const headers = [
+        "index", "poly", "refreshMs", "noteDurationMs", "estimatedLatencyMs", "estimatedLatencyPerfMs",
+        "baseLatencyMs", "outputLatencyMs", "cpuUsagePercent", "stability", "threshold", "timestamp", "userAgent"
+      ];
+      const lines = [headers.join(",")];
+      for (const row of results) {
+        const vals = headers.map((key) => {
+          const raw = row[key] ?? "";
+          const text = String(raw).replaceAll('"', '""');
+          return `"${text}"`;
+        });
+        lines.push(vals.join(","));
+      }
+      downloadText("latency-poly-results.csv", lines.join("\n"), "text/csv;charset=utf-8");
+    }
+
+    el.initBtn.addEventListener("click", initAudio);
+    el.measureBtn.addEventListener("click", async () => {
+      try {
+        await measureEstimatedLatency();
+      } catch (err) {
+        console.error(err);
+        cancelMeasureLoop();
+        setMeasureButtonsDisabled(false);
+        log("測試失敗", String(err?.message || err));
+      }
+    });
+    el.measureBatchBtn.addEventListener("click", async () => {
+      try {
+        await measureRepeatedLatency();
+      } catch (err) {
+        console.error(err);
+        cancelMeasureLoop();
+        setMeasureButtonsDisabled(false);
+        log("自動測試失敗", String(err?.message || err));
+      }
+    });
+    el.startStressBtn.addEventListener("click", async () => {
+      try {
+        await startPolyStress();
+      } catch (err) {
+        console.error(err);
+        log("stress 啟動失敗", String(err?.message || err));
+      }
+    });
+    el.stopStressBtn.addEventListener("click", stopPolyStress);
+    el.saveRowBtn.addEventListener("click", () => saveCurrentRow());
+    el.runSweepBtn.addEventListener("click", runSweep);
+    el.exportJsonBtn.addEventListener("click", exportJson);
+    el.exportCsvBtn.addEventListener("click", exportCsv);
+
+    for (const id of ["polySelect", "refreshSelect", "noteDurationMs"]) {
+      $(id).addEventListener("change", updateMetrics);
+    }
+
+    window.addEventListener("beforeunload", () => {
+      try { cancelMeasureLoop(); } catch {}
+      try { stopPolyStress(); } catch {}
+    });
+
+    updateMetrics();
+  </script>
+</body>
+</html>
