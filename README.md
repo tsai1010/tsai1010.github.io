@@ -280,6 +280,8 @@ enableRoutingComposer({
 
 ---
 
+[**Performance Test**](https://tsai1010.github.io/demo/latency_poly_test_firefox_safe.html)
+
 ## Design Notes
 
 - Routing Composer processes **MIDI message data**, not MIDI devices
