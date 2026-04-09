@@ -129,7 +129,9 @@ window.midiCcPanelGetVelocity = window.midiCcPanelGetVelocity || function(){ ret
 
 
   // ---------- MIDI 送訊層（可用 hooks 或 Web MIDI） ----------
-  const hooks = (window.midiCcPanelHooks || {});
+  function getHooks() {
+    return window.midiCcPanelHooks || {};
+  }
   let midiOutputs = [];
 
   function initWebMIDIOnce() {
@@ -155,29 +157,37 @@ window.midiCcPanelGetVelocity = window.midiCcPanelGetVelocity || function(){ ret
   }
 
   function sendCC(channelSel, cc, value) {
+    const hooks = getHooks();
+
     if (typeof hooks.onCC === "function") {
       forEachChannel(channelSel, ch => hooks.onCC(ch, cc, value));
       return;
     }
+
     // Web MIDI fallback
     if (!midiOutputs.length) initWebMIDIOnce();
     forEachChannel(channelSel, ch => {
-      const status = 0xB0 | ((ch-1) & 0x0F);
+      const status = 0xB0 | ((ch - 1) & 0x0F);
       const data = [status, cc & 0x7F, value & 0x7F];
       midiOutputs.forEach(out => out.send(data));
     });
   }
 
   function sendPitchBend(channelSel, value /* -8192..8191 */) {
+    const hooks = getHooks();
+
     if (typeof hooks.onPitchBend === "function") {
       forEachChannel(channelSel, ch => hooks.onPitchBend(ch, value));
       return;
     }
+
     if (!midiOutputs.length) initWebMIDIOnce();
     const v = value + 8192; // -> 0..16383
-    const lsb = v & 0x7F, msb = (v >> 7) & 0x7F;
+    const lsb = v & 0x7F;
+    const msb = (v >> 7) & 0x7F;
+
     forEachChannel(channelSel, ch => {
-      const status = 0xE0 | ((ch-1) & 0x0F);
+      const status = 0xE0 | ((ch - 1) & 0x0F);
       midiOutputs.forEach(out => out.send([status, lsb, msb]));
     });
   }

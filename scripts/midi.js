@@ -293,20 +293,24 @@ function drainAllNotesOff() {
 
 
 //-----------------------------------------------------------------------------------------------------------------------------//
-function synthOn(n, v){
-    if(!oscSet[n.toString()]){
-        oscSet[n.toString()] = 1;
-        midi_synth.send([0x91, n, v]);
+function synthOn(n, v, ch = 0){
+    const ch0 = Math.max(0, Math.min(15, Number(ch) || 0));
+    const key = `${ch0}:${n}`;
+
+    if(!oscSet[key]){
+        oscSet[key] = 1;
+        midi_synth.send([0x90 | ch0, n, v]);
     }
-    
 }
 
-function synthOff(n){
-    if(oscSet[n.toString()]){
-        midi_synth.send([0x81, n]);
-        delete oscSet[n.toString()];
+function synthOff(n, ch = 0){
+    const ch0 = Math.max(0, Math.min(15, Number(ch) || 0));
+    const key = `${ch0}:${n}`;
+
+    if(oscSet[key]){
+        midi_synth.send([0x80 | ch0, n, 0]);
+        delete oscSet[key];
     }
-    
 }
 
 

@@ -1398,14 +1398,31 @@ class MidiSynth {
         // 6) 建立路由 API：將 noteOn/off 轉成 MIDI bytes 丟進 GUI 的 __RC_HANDLE__
         this.routingComposer = {
             onNoteOn: (ch, note, vel, t) => {
-                const v = Math.max(1, Math.min(127, Math.round((vel ?? 1) * 127)));
-                const data = new Uint8Array([(0x90 | (ch & 0x0f)), (note & 0x7f), v]);
+                let vNum = Number(vel);
+
+                // 兼容兩種來源：
+                // 1) 舊寫法：0~1 浮點 velocity
+                // 2) 現在 UI / MIDI 寫法：1~127 MIDI velocity
+                if (!Number.isFinite(vNum)) vNum = 127;
+
+                const v =
+                    vNum <= 1
+                        ? Math.max(1, Math.min(127, Math.round(vNum * 127)))
+                        : Math.max(1, Math.min(127, Math.round(vNum)));
+
+                const data = new Uint8Array([
+                    (0x90 | (ch & 0x0f)),
+                    (note & 0x7f),
+                    v
+                ]);
+
                 if (window.__RC_HANDLE__?.midi) {
                     window.__RC_HANDLE__.midi(data);
                 } else {
                     console.warn("[RC] __RC_HANDLE__.midi not ready");
                 }
             },
+
             onNoteOff: (ch, note, t) => {
                 const data = new Uint8Array([(0x80 | (ch & 0x0f)), (note & 0x7f), 0]);
                 if (window.__RC_HANDLE__?.midi) {
