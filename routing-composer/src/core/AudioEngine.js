@@ -5,6 +5,7 @@
 // -------------------------------------------------------------
 
 import { generatePianoExcitation } from "./excitation.js";
+import { CAPTURE_WORKLET_SOURCE } from "./captureWorkletSource.js";
 
 export class AudioEngine {
   constructor(actx) {
@@ -17,6 +18,34 @@ export class AudioEngine {
 
     this.analyser = this.actx.createAnalyser();
     this.analyser.fftSize = 2048;
+
+    this._captureSink = this.actx.createGain();
+    this._captureSink.gain.value = 0;
+
+    this.captureNode = null;
+    this._captureWorkletReady = false;
+    this._captureStopTimer = null;
+
+    // capture state
+    this._captureActive = false;
+    this._captureStarted = false;
+    this._captureSampleRate = this.actx.sampleRate;
+    this._captureMaxSec = 3.0;
+    this._captureStartTime = 0;
+    this._captureSoundStartTime = 0;
+    this._captureThreshold = 0.01;
+    this._captureStopAt = 0;
+    this._captureTailSec = 0.5;
+
+    this.onCaptureComplete = null;
+    this.lastCaptureData = null;
+    this.captureListeners = new Set();
+
+    this._captureInitPromise = null;
+    this._captureModuleLoadedForCtx = null;
+
+    
+
 
     this.liveNodes = new Map(); // all active WebAudio nodes per chain
 
@@ -59,6 +88,198 @@ export class AudioEngine {
     }, 2000);
 
   }
+
+    async initCaptureWorklet() {
+        if (this._captureWorkletReady && this.captureNode) return;
+        if (this._captureInitPromise) return this._captureInitPromise;
+
+        this._captureInitPromise = (async () => {
+            try {
+                // 同一個 AudioContext 只載一次 module
+                if (this._captureModuleLoadedForCtx !== this.actx) {
+                    // const res = await fetch(`/capture-worklet.js?v=${Date.now()}`, { cache: "no-store" });
+                    // if (!res.ok) {
+                    //     throw new Error(`capture-worklet fetch failed: HTTP ${res.status}`);
+                    // }
+
+                    const source = CAPTURE_WORKLET_SOURCE
+                    const blob = new Blob([source], { type: "application/javascript" });
+                    const blobURL = URL.createObjectURL(blob);
+
+                    try {
+                        await this.actx.audioWorklet.addModule(blobURL);
+                    } finally {
+                        setTimeout(() => URL.revokeObjectURL(blobURL), 1000);
+                    }
+
+                    this._captureModuleLoadedForCtx = this.actx;
+                }
+
+                // 保險起見：先斷開舊 graph
+                try { this.analyser.disconnect(); } catch {}
+                try { this.captureNode?.disconnect(); } catch {}
+                try { this._captureSink.disconnect(); } catch {}
+
+                this.captureNode = new AudioWorkletNode(this.actx, "capture-processor", {
+                    numberOfInputs: 1,
+                    numberOfOutputs: 1,
+                    channelCount: 1,
+                });
+
+                this.captureNode.port.onmessage = (e) => {
+                    const msg = e.data || {};
+                    if (msg.type !== "captureComplete") return;
+
+                    const raw = msg.samples instanceof Float32Array
+                        ? msg.samples
+                        : new Float32Array(msg.samples || []);
+
+                    this._handleCapturedSamples(raw, msg.sampleRate || this.actx.sampleRate);
+                };
+
+                this.analyser.connect(this.captureNode);
+                this.captureNode.connect(this._captureSink);
+                this._captureSink.connect(this.actx.destination);
+
+                this._captureWorkletReady = true;
+                console.log("[RC][Capture] AudioWorklet ready");
+            } catch (e) {
+                console.warn("[RC][Capture] initCaptureWorklet failed", e);
+                this._captureWorkletReady = false;
+                this.captureNode = null;
+                throw e;
+            } finally {
+                this._captureInitPromise = null;
+            }
+        })();
+
+        return this._captureInitPromise;
+    }
+
+    _handleCapturedSamples(raw, sr = this.actx.sampleRate) {
+        this._captureActive = false;
+        this._captureStopAt = 0;
+
+        if (!raw || !raw.length) {
+            console.log("[CAPTURE] complete: null");
+            this._emitCapture(null);
+            return null;
+        }
+
+        const threshold = 0.01;
+        let start = 0;
+        while (start < raw.length && Math.abs(raw[start]) < threshold) {
+            start++;
+        }
+
+        let out = raw;
+        if (start > 0 && start < raw.length) {
+            out = raw.slice(start);
+        }
+
+        let peak = 0;
+        for (let i = 0; i < out.length; i++) {
+            const a = Math.abs(out[i]);
+            if (a > peak) peak = a;
+        }
+
+        const payload = {
+            samples: out,
+            sampleRate: sr,
+            peak,
+            trimStart: start,
+        };
+
+        this.lastCaptureData = payload;
+
+        console.log("[CAPTURE] complete", {
+            length: out.length,
+            peak,
+            trimStart: start,
+            first16: Array.from(out.slice(0, 16)),
+        });
+
+        this._emitCapture(payload);
+        return out;
+    }
+
+    addCaptureListener(fn) {
+        if (typeof fn !== "function") return () => {};
+        this.captureListeners.add(fn);
+        return () => {
+            this.captureListeners.delete(fn);
+        };
+    }
+
+    _emitCapture(payload) {
+        for (const fn of this.captureListeners) {
+            try {
+            fn(payload);
+            } catch (e) {
+            console.warn("[RC][Capture] listener failed", e);
+            }
+        }
+    }
+
+    async startCapture() {
+        await this.initCaptureWorklet();
+
+        this._captureActive = true;
+        this._captureStarted = false;
+        this._captureBuffer = [];
+        this._captureStartTime = this.actx.currentTime;
+        this._captureSoundStartTime = 0;
+        this._captureThreshold = 0.01;
+        this._captureStopAt = 0;
+        this._captureTailSec = 0.5;
+
+        if (this.captureNode?.port) {
+            this.captureNode.port.postMessage({
+            type: "start",
+            threshold: this._captureThreshold,
+            });
+        }
+    }
+
+    stopCapture() {
+        if (this.captureNode?.port) {
+            this.captureNode.port.postMessage({ type: "stop" });
+            return null;
+        }
+        return this._finalizeCapture();
+    }
+
+    scheduleCaptureStopAfterNoteOff(tailSec = 0.5) {
+        if (!this._captureActive) return;
+
+        clearTimeout(this._captureStopTimer);
+
+        this._captureStopTimer = setTimeout(() => {
+            this.stopCapture();
+        }, tailSec * 1000);
+    }
+
+    _finalizeCapture() {
+        this._captureActive = false;
+        this._captureStopAt = 0;
+
+        if (!this._captureBuffer.length) {
+            console.log("[CAPTURE] complete: null");
+            this._emitCapture(null);
+            return null;
+        }
+
+        const totalLength = this._captureBuffer.reduce((a, b) => a + b.length, 0);
+        const raw = new Float32Array(totalLength);
+
+        let offset = 0;
+        for (const chunk of this._captureBuffer) {
+            raw.set(chunk, offset);
+            offset += chunk.length;
+        }
+
+        return this._handleCapturedSamples(raw, this.actx.sampleRate);
+    }
 
   setIRBuffer(irId, audioBuffer) {
         console.log("[RC][IR] register IR buffer:", irId, audioBuffer);
@@ -140,6 +361,18 @@ export class AudioEngine {
         this.analyser = this.actx.createAnalyser();
         this.analyser.fftSize = 2048;
 
+        this._captureSink = this.actx.createGain();
+        this._captureSink.gain.value = 0;
+
+        this._captureWorkletReady = false;
+        this.captureNode = null;
+        this._captureModuleLoadedForCtx = null;
+
+
+        this.initCaptureWorklet().catch((e) => {
+            console.warn("[RC] capture worklet re-init failed", e);
+        });
+
         // 重新建立每個 channel 的 mixer（新的 context）
         this.mixers = Array.from({ length: 16 }, () => {
             const g = this.actx.createGain();
@@ -148,6 +381,9 @@ export class AudioEngine {
         });
 
         console.log('[RC] adopted synth AudioContext and rebuilt mixers');
+        console.log("[RC][Capture] actx =", this.actx);
+        console.log("[RC][Capture] audioWorklet exists =", !!this.actx.audioWorklet);
+        console.log("[RC][Capture] AudioWorkletNode exists =", typeof AudioWorkletNode);
     }
 
     // 4) 重新把 mixers 接回 synth 的 chvol（同一 context 了）
@@ -171,6 +407,95 @@ export class AudioEngine {
         await this.midiSynth.actx.resume();
       }
     } catch {}
+  }
+
+  // KS smoothing resolution:
+  // - manual: use params.smoothingFactor directly
+  // - auto: compute profile-based value (steel / nylon)
+  // - final smoothing = clamp(auto + user offset, profile-safe range)
+  // We also store the latest auto/final values for GUI inspection.
+  clampValue(v, min, max) {
+    return Math.min(max, Math.max(min, v));
+  }
+
+  computeKSAutoSmooth(profile, note, velocity) {
+    const nn = this.clampValue((Number(note) - 36) / 48, 0, 1);
+    const vn = this.clampValue((Number(velocity) - 1) / 126, 0, 1);
+
+    if (profile === "nylon") {
+        const highBoost = this.clampValue((Number(note) - 60) / 24, 0, 1);
+
+        const base =
+            0.22 +
+            0.18 * Math.pow(nn, 0.8) +
+            0.10 * Math.pow(highBoost, 1.1) -
+            0.04 * Math.pow(vn, 0.7);
+
+        const rand =
+            (Math.random() * 2 - 1) * 0.008 +
+            (1 - nn) * (Math.random() * 2 - 1) * 0.005;
+
+        return {
+            auto: base + rand,
+            min: 0.05,
+            max: 0.75,
+        };
+    }
+
+    const base =
+      0.30 +
+      0.38 * Math.pow(this.clampValue((Number(note) - 24) / 72, 0, 1), 0.65);
+
+    const rand = Math.random() * 0.05;
+
+    return {
+      auto: base + rand,
+      min: 0.08,
+      max: 0.92,
+    };
+  }
+
+  resolveKSSmoothing(params, note, velocity) {
+    const mode = String(params?.smoothingMode ?? "auto");
+
+    if (mode === "manual") {
+      const manual = Number(params?.smoothingFactor);
+      return {
+        mode: "manual",
+        profile: null,
+        autoSmooth: null,
+        finalSmooth: this.clampValue(
+          Number.isFinite(manual) ? manual : 0.2,
+          0.01,
+          0.99
+        ),
+      };
+    }
+
+    const profile = String(params?.autoSmoothingProfile ?? "steel");
+    const offsetRaw = Number(params?.smoothingOffset);
+    const offset = Number.isFinite(offsetRaw) ? offsetRaw : 0;
+
+    const { auto, min, max } = this.computeKSAutoSmooth(profile, note, velocity);
+    const finalSmooth = this.clampValue(auto + offset, min, max);
+
+    return {
+      mode: "auto",
+      profile,
+      autoSmooth: auto,
+      finalSmooth,
+    };
+  }
+
+  setKSLastSmoothInfo(modId, info) {
+    this.liveNodes.set(modId + ":lastSmoothInfo", {
+      ...info,
+      updatedAt: performance.now(),
+    });
+  }
+
+  getKSLastSmoothInfo(modId) {
+    return this.liveNodes.get(modId + ":lastSmoothInfo") || null;
   }
 
   // --------------------------------------------------------------------
@@ -198,6 +523,7 @@ export class AudioEngine {
                 this.liveNodes.set(mod.id + ":ksOut", out);
                 this.liveNodes.set(mod.id + ":ksParams", p);
                 this.liveNodes.set(mod.id + ":chainIdx", chainIdx | 0);
+                this.liveNodes.set(mod.id + ":lastSmoothInfo", null);
                 this.liveNodes.set("__lastKsId__", mod.id);
                 this.liveNodes.set("keyboardTarget", out);
                 return { in: out, out: out };
@@ -674,6 +1000,10 @@ export class AudioEngine {
         // --------------------------------------------------
         this.releaseSourceEnv(ch, nn);
         this.releaseOsc(ch, nn);
+
+        if (this._captureActive) {
+            this.scheduleCaptureStopAfterNoteOff(0.5);
+        }       
         return;
     }
 
@@ -1008,38 +1338,38 @@ export class AudioEngine {
         const bf = this.actx.createBuffer(2, frames, sr);
 
         // smoothing
-        const mode = String(params.smoothingMode ?? "auto");
-        const opts = this.midiSynth?.options?.[ch] ?? {};
-        let smoothingFactor;
-
-        if (mode === "manual") {
-            let s = Number(params.smoothingFactor);
-            if (!Number.isFinite(s)) s = 0.2;
-            if (s < 0.01) s = 0.01;
-            if (s > 0.99) s = 0.99;
-            smoothingFactor = s;
-        } else {
-            try {
-                const inv127 = this.midiSynth?.inv127 ?? (1 / 127);
-                const nn = Math.pow(note / 64, 0.5) || 0;
-                let stringDamping = (note * inv127) * 0.85 + 0.15;
-                if (typeof opts.stringDamping === "number") {
-                    stringDamping = opts.stringDamping;
-                } else if (this.midiSynth?.options?.[ch]) {
-                    this.midiSynth.options[ch].stringDamping = stringDamping;
-                }
-                const varAmt = Number(opts.stringDampingVariation ?? 0);
-                smoothingFactor =
-                    stringDamping +
-                    nn * (1 - stringDamping) * 0.5 +
-                    (1 - stringDamping) * Math.random() * varAmt;
-            } catch {
-                smoothingFactor = 0.2;
-            }
-        }
+        const smoothInfo = this.resolveKSSmoothing(params, note, velocity);
+        let smoothingFactor = smoothInfo.finalSmooth;
         if (!Number.isFinite(smoothingFactor)) smoothingFactor = 0.2;
 
+        const opts = {
+            stringTension:
+                Number(this.midiSynth?.options?.[ch]?.stringTension ?? 0.0),
+            pluckDamping:
+                Number(this.midiSynth?.options?.[ch]?.pluckDamping ?? 0.5),
+            pluckDampingVariation:
+                Number(this.midiSynth?.options?.[ch]?.pluckDampingVariation ?? 0.1),
+            characterVariation:
+                Number(this.midiSynth?.options?.[ch]?.characterVariation ?? 0.2),
+            body:
+                this.midiSynth?.options?.[ch]?.body ?? "simple",
+            stereoSpread:
+                Number(this.midiSynth?.options?.[ch]?.stereoSpread ?? 0.2),
+        };
+
         const velScale = Number(params.velScale == null ? 1 : params.velScale);
+
+        this.setKSLastSmoothInfo(m.modId, {
+            mode: smoothInfo.mode,
+            profile: smoothInfo.profile,
+            note,
+            velocity,
+            autoSmooth: smoothInfo.autoSmooth,
+            finalSmooth: smoothInfo.finalSmooth,
+            offset: Number.isFinite(Number(params?.smoothingOffset))
+              ? Number(params.smoothingOffset)
+              : 0,
+        });
 
         // asm pluck
         try {
