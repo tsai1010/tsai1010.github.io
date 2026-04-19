@@ -15,6 +15,12 @@ const oscSet = {};
 //   }
 // }
 
+window.__midiDbgSeq = 0;
+function nextMidiDbgId() {
+  window.__midiDbgSeq = (window.__midiDbgSeq || 0) + 1;
+  return window.__midiDbgSeq;
+}
+
 async function initAudio() {
     if (!ctxStart) {
         // 建立 AudioContext
@@ -108,38 +114,38 @@ function frequencyToPeriod(freq) {
     return freq > 0 ? 1 / freq : 0.0002;
   }
 
-if(navigator.requestMIDIAccess){
-    navigator.requestMIDIAccess().then(success, failure);
-}
+// if(navigator.requestMIDIAccess){
+//     navigator.requestMIDIAccess().then(success, failure);
+// }
 
-function success(midiAccess){
-    inputs = midiAccess.inputs;
-    let midiPort = document.getElementById("midiInputPort");
-    inputs.forEach((input)=>{
-        console.log(input);
-        if(!midiInputs[input.name]) {
-            midiInputs[input.name] = input;
-            midiPort.innerHTML += "<option value=\"" + input.name + "\">" + input.name + "</option>";
-            console.log("input.name", input.name);
-        }
-        if(allPort) input.onmidimessage = handleInput;
-    })
+// function success(midiAccess){
+//     inputs = midiAccess.inputs;
+//     let midiPort = document.getElementById("midiInputPort");
+//     inputs.forEach((input)=>{
+//         console.log(input);
+//         if(!midiInputs[input.name]) {
+//             midiInputs[input.name] = input;
+//             midiPort.innerHTML += "<option value=\"" + input.name + "\">" + input.name + "</option>";
+//             console.log("input.name", input.name);
+//         }
+//         if(allPort) input.onmidimessage = handleInput;
+//     })
 
-}
+// }
 
-function setPort(portName){
-    inputs.forEach((input)=>{
-        input.onmidimessage = null;
-    })
+// function setPort(portName){
+//     inputs.forEach((input)=>{
+//         input.onmidimessage = null;
+//     })
 
-    inputs.forEach((input)=>{
-        if(portName === "all") input.onmidimessage = handleInput;
-        else if(portName == input.name) {
-            input.onmidimessage = handleInput;
-            // console.log("port:", input.name);
-        }
-    })
-}
+//     inputs.forEach((input)=>{
+//         if(portName === "all") input.onmidimessage = handleInput;
+//         else if(portName == input.name) {
+//             input.onmidimessage = handleInput;
+//             // console.log("port:", input.name);
+//         }
+//     })
+// }
 
 
 // function karplusStrong(noteFreq, duration = 2, harmonics = 0.5) {
