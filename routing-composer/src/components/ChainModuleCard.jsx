@@ -136,6 +136,7 @@ function ParamSlider({
 
 export default function ChainModuleCard({
   mod,
+  runtimeInfo = null,
   onToggle,
   onRemove,
   onParam,
@@ -241,16 +242,65 @@ export default function ChainModuleCard({
               </select>
             </div>
 
+            {String(params.smoothingMode ?? "auto") === "auto" && (
+              <div className="flex items-center gap-2">
+                <div className="w-24 text-sm opacity-80">Profile</div>
+                <select
+                  className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
+                  value={String(params.autoSmoothingProfile ?? "steel")}
+                  onChange={(e) => {
+                    onParam("autoSmoothingProfile", e.target.value);
+                    e.target.blur();
+                  }}
+                >
+                  <option value="steel">steel</option>
+                  <option value="nylon">nylon</option>
+                </select>
+              </div>
+            )}
+
             {/* Manual smoothing slider */}
             {String(params.smoothingMode ?? "auto") === "manual" && (
               <ParamSlider
                 label="smooth"
                 min={0}
                 max={1}
-                step={0.01}
+                step={0.001}
                 value={Number(params.smoothingFactor ?? 0.2)}
                 onChange={(v) => onParam("smoothingFactor", v)}
               />
+            )}
+
+            {String(params.smoothingMode ?? "auto") === "auto" && (
+              <ParamSlider
+                label="offset"
+                min={-0.2}
+                max={0.2}
+                step={0.001}
+                value={Number(params.smoothingOffset ?? 0)}
+                onChange={(v) => onParam("smoothingOffset", v)}
+              />
+            )}
+
+            {String(params.smoothingMode ?? "auto") === "auto" && (
+              <div className="rounded-lg border border-white/10 bg-black/15 px-3 py-2 text-xs space-y-1">
+                <div className="flex justify-between gap-4">
+                  <span className="opacity-70">Auto</span>
+                  <span className="tabular-nums">
+                    {Number.isFinite(Number(runtimeInfo?.autoSmooth))
+                      ? Number(runtimeInfo.autoSmooth).toFixed(3)
+                      : "—"}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="opacity-70">Final</span>
+                  <span className="tabular-nums">
+                    {Number.isFinite(Number(runtimeInfo?.finalSmooth))
+                      ? Number(runtimeInfo.finalSmooth).toFixed(3)
+                      : "—"}
+                  </span>
+                </div>
+              </div>
             )}
 
             {/* Velocity scale */}
@@ -295,8 +345,6 @@ export default function ChainModuleCard({
                   e.target.blur();
                 }}
               >
-                <option value="piano">Piano</option>
-                
                 <option value="brown">Soft</option>
                 <option value="softBrown">Extra Soft</option>
                 <option value="red">Deep Soft</option>
@@ -318,13 +366,6 @@ export default function ChainModuleCard({
                 <option value="grey">Mix</option>
               </select>
             </div>
-
-            {String(params.smoothingMode ?? "auto") === "auto" && (
-              <div className="text-[11px] opacity-70">
-                auto: smoothing 依據 synth.options[ch].stringDamping /
-                variation 與 note 計算
-              </div>
-            )}
           </>
         )}
 

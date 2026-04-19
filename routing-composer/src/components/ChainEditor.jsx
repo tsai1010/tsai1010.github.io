@@ -8,6 +8,7 @@ import React, { useEffect, useState, useRef } from "react";
 import ChainModuleCard from "./ChainModuleCard.jsx";
 import { AudioEngine } from "../core/AudioEngine.js";
 import { normalizeRoutingState, normalizeSingleChain } from "../core/routingIO.js";
+import SpectrogramComparePanel from "./SpectrogramComparePanel.jsx";
 
 // Tailwind base styles
 const buttonClass =
@@ -19,11 +20,21 @@ const cardClass =
 const MODULES = ["ks_source", "source", "filter", "delay", "reverb", "convolver_ir", "gain", "analyzer"];
 
 const DEFAULT_PARAMS = {
-  ks_source: { smoothingMode: "auto", smoothingFactor: 0.2, velScale: 1.0, seedNoiseType: "pink", useSynthA4: true, ch: "all", program: "all" },
-  source: { 
+  ks_source: {
+    smoothingMode: "auto",
+    smoothingFactor: 0.2,
+    autoSmoothingProfile: "steel",
+    smoothingOffset: 0.0,
+    velScale: 1.0,
+    seedNoiseType: "pink",
+    useSynthA4: true,
+    ch: "all",
+    program: "all",
+  },
+  source: {
     type: "sawtooth",
-    ch: "all",                 // ← 新增：目標 MIDI channel（"all" | 0..15）
-    adsr: { a: 0.003, d: 0.08, s: 0.4, r: 0.2 }  // ← 新增：每個 source 的 ADSR
+    ch: "all",
+    adsr: { a: 0.003, d: 0.08, s: 0.4, r: 0.2 },
   },
   filter: { mode: "lowpass", freq: 1200, q: 0.7 },
   delay: { time: 0.25, feedback: 0.35, mix: 0.3 },
@@ -37,6 +48,7 @@ const DEFAULT_PARAMS = {
 function uid(prefix = "m") {
   return `${prefix}_${Math.random().toString(36).slice(2, 9)}`;
 }
+
 function arrayMove(arr, from, to) {
   const c = arr.slice();
   const s = Math.max(0, Math.min(c.length - 1, from));
@@ -75,16 +87,17 @@ function applySynthGlobalState(synth, globalState) {
   }
 }
 
-export default function ChainEditor({ 
+export default function ChainEditor({
   synth,
   initialState,
-  onChange, 
+  onChange,
 }) {
   const engineRef = useRef(null);
   if (!engineRef.current) engineRef.current = new AudioEngine();
   const engine = engineRef.current;
 
   const chainScrollRefs = useRef([]);
+  const midiAccessRef = useRef(null);
 
   // 初始化：讓音引擎知道 midi_synth
   useEffect(() => {
@@ -96,7 +109,7 @@ export default function ChainEditor({
         console.warn("[RC] setMidiSynth failed", e);
       }
     }
-  }, [synth]);
+  }, [synth, engine]);
 
   const makeDefaultChains = () => [[
     { id: uid("ks"), kind: "ks_source", enabled: true, params: { ...DEFAULT_PARAMS.ks_source } },
@@ -122,7 +135,38 @@ export default function ChainEditor({
     return Array.isArray(m) ? m : [];
   });
 
-  
+  // UI state
+  const [showSpectrogramCompare, setShowSpectrogramCompare] = useState(
+    Boolean(initialState?.ui?.showSpectrogramCompare ?? false)
+  );
+  const [ksRuntimeInfo, setKsRuntimeInfo] = useState({});
+
+  const [midiSupported, setMidiSupported] = useState(
+    typeof navigator !== "undefined" &&
+      typeof navigator.requestMIDIAccess === "function"
+  );
+
+  const [midiInputs, setMidiInputs] = useState([]);
+  const [midiInputMode, setMidiInputMode] = useState(
+    initialState?.ui?.midiInputMode ?? "all"
+  );
+  const [selectedMidiInputId, setSelectedMidiInputId] = useState(
+    initialState?.ui?.selectedMidiInputId ?? ""
+  );
+
+  const midiModeRef = useRef(midiInputMode);
+  const selectedMidiInputIdRef = useRef(selectedMidiInputId);
+  const midiInputsBoundRef = useRef(false);
+  const midiIngressBusyRef = useRef(false);
+
+  useEffect(() => {
+    midiModeRef.current = midiInputMode;
+  }, [midiInputMode]);
+
+  useEffect(() => {
+    selectedMidiInputIdRef.current = selectedMidiInputId;
+  }, [selectedMidiInputId]);
+
   const chainMutesRef = useRef(chainMutes);
   useEffect(() => {
     chainMutesRef.current = chainMutes;
@@ -159,7 +203,7 @@ export default function ChainEditor({
 
   const chainAutoScrollRef = useRef({
     activeChainIdx: null,
-    direction: 0, // -1 = left, 1 = right, 0 = stop
+    direction: 0,
     rafId: null,
   });
 
@@ -176,7 +220,7 @@ export default function ChainEditor({
 
     const tick = () => {
       const { activeChainIdx, direction, strength } = chainAutoScrollRef.current;
-      
+
       if (activeChainIdx == null || direction === 0) {
         chainAutoScrollRef.current.rafId = null;
         return;
@@ -227,11 +271,13 @@ export default function ChainEditor({
     const canScrollLeft = el.scrollLeft > 0;
     const canScrollRight = el.scrollLeft < el.scrollWidth - el.clientWidth - 1;
 
-    const scrollOuter = 100; // 真正開始 auto-scroll 的範圍
-    const glowOuter = 250;   // 先發亮提示的範圍
+    const scrollOuter = 100;
+    const glowOuter = 350;
 
-    // ---------- 左邊 ----------
     if (x <= glowOuter && canScrollLeft) {
+      clearInterval(glowFadeTimers.current[chainIdx]);
+      glowFadeTimers.current[chainIdx] = null;
+
       const glowStrength = Math.max(
         0.3,
         Math.min(1, (glowOuter - x) / glowOuter)
@@ -250,14 +296,15 @@ export default function ChainEditor({
         );
         startAutoScroll(chainIdx, -1, scrollStrength);
       } else {
-        // 只停捲動，不觸發 fadeOut，保留 glow 提示
         haltAutoScrollOnly();
       }
       return;
     }
 
-    // ---------- 右邊 ----------
     if (x >= rect.width - glowOuter && canScrollRight) {
+      clearInterval(glowFadeTimers.current[chainIdx]);
+      glowFadeTimers.current[chainIdx] = null;
+
       const dist = rect.width - x;
       const glowStrength = Math.max(
         0.3,
@@ -277,13 +324,11 @@ export default function ChainEditor({
         );
         startAutoScroll(chainIdx, 1, scrollStrength);
       } else {
-        // 只停捲動，不觸發 fadeOut，保留 glow 提示
         haltAutoScrollOnly();
       }
       return;
     }
 
-    // 完全離開 glow 區
     stopAutoScroll();
   };
 
@@ -367,6 +412,18 @@ export default function ChainEditor({
       setChainMutes(normalized.mutes);
       applySynthGlobalState(synth, normalized.global);
 
+      if (json?.ui && typeof json.ui === "object") {
+        if (typeof json.ui.showSpectrogramCompare === "boolean") {
+          setShowSpectrogramCompare(json.ui.showSpectrogramCompare);
+        }
+        if (typeof json.ui.midiInputMode === "string") {
+          setMidiInputMode(json.ui.midiInputMode);
+        }
+        if (typeof json.ui.selectedMidiInputId === "string") {
+          setSelectedMidiInputId(json.ui.selectedMidiInputId);
+        }
+      }
+
       console.log("[RC] routing loaded from URL:", url);
     } catch (e) {
       console.warn("[RC] loadFromURL failed:", e);
@@ -386,15 +443,13 @@ export default function ChainEditor({
       const normalized = normalizeSingleChain(json, { idPrefix: `c${idx}_` });
       if (!normalized || !normalized.chain) throw new Error("Invalid chain JSON");
 
-      // 1) chains：確保長度 >= idx+1，再替換
       setChains((cc) => {
         const next = Array.isArray(cc) ? cc.slice() : [];
-        while (next.length < idx + 1) next.push([]); // ✅ 自動補空 chain
+        while (next.length < idx + 1) next.push([]);
         next[idx] = normalized.chain;
         return next;
       });
 
-      // 2) meta：確保長度 >= idx+1，再替換
       setChainMeta((mm) => {
         const next = Array.isArray(mm) ? mm.slice() : [];
         while (next.length < idx + 1) next.push({});
@@ -402,7 +457,6 @@ export default function ChainEditor({
         return next;
       });
 
-      // 3) mutes：確保長度 >= idx+1，再替換
       setChainMutes((mm) => {
         const next = Array.isArray(mm) ? mm.slice() : [];
         while (next.length < idx + 1) next.push(false);
@@ -416,8 +470,6 @@ export default function ChainEditor({
     }
   }
 
-
-
   const toggleChainMute = (idx) => {
     setChainMutes((prev) => {
       const next = [...prev];
@@ -426,9 +478,182 @@ export default function ChainEditor({
     });
   };
 
-  // 🔒 Step 3：判斷該 chain 是否被鎖定
   const isChainLocked = (chainIdx) =>
     chainMeta?.[chainIdx]?.locked === true;
+
+  // -------------------------------------------------------------
+  // ⚠️ IMPORTANT: MIDI binding design (DO NOT change lightly)
+  //
+  // 我們目前採用「所有 MIDI inputs 綁一次 + handler 內過濾」的方式，
+  // 而不是在 UI 切換時反覆 clear / rebind input.onmidimessage。
+  //
+  // ❗ 為什麼這樣做：
+  // 舊實作（clear + rebind）在某些環境（例如 VMPK / 虛擬 MIDI port）會出問題：
+  // - 切換 port 後仍然收到其他 port 的訊息
+  // - 某些 input handler 在 statechange / refresh 後殘留或被重建
+  // - 造成 MIDI 訊息重複觸發，甚至形成類似「無限迴圈」的現象
+  // - GUI 會被大量 MIDI event 卡死（主執行緒被塞爆）
+  //
+  // ✅ 現在的設計：
+  // - 所有 input.onmidimessage 只在初始化時綁一次
+  // - 每個 event 進來時才判斷：
+  //     - midiInputMode === "none"     → 忽略
+  //     - midiInputMode === "all"      → 全部通過
+  //     - midiInputMode === "selected" → 只允許特定 input.id
+  //
+  // - 使用 useRef（midiModeRef / selectedMidiInputIdRef）避免 closure 問題
+  // - 使用 midiIngressBusyRef 防止高頻 event 導致 re-entry / freeze
+  //
+  // ❗ 絕對不要改回：
+  // - 每次 mode 改變就 clear 所有 input.onmidimessage 再重新綁
+  // - 或在 useEffect 中反覆 applyMidiBindings()
+  //
+  // 如果要修改這段，請先確認：
+  // - 不會造成 handler 重複綁定
+  // - 不會讓非選定 port 的訊號進入 engine
+  // - 不會在高頻 MIDI input 下造成 UI freeze
+  // -------------------------------------------------------------
+
+  // ------------------------------
+  // MIDI input management (GUI controlled)
+  // ------------------------------
+  const refreshMidiInputs = async () => {
+    if (typeof navigator === "undefined" || typeof navigator.requestMIDIAccess !== "function") {
+      setMidiSupported(false);
+      setMidiInputs([]);
+      midiAccessRef.current = null;
+      midiInputsBoundRef.current = false;
+      return;
+    }
+
+    try {
+      const access = await navigator.requestMIDIAccess();
+      midiAccessRef.current = access;
+
+      const nextInputs = Array.from(access.inputs.values()).map((input) => ({
+        id: String(input.id),
+        name: input.name || input.manufacturer || `MIDI Input ${input.id}`,
+      }));
+
+      setMidiSupported(true);
+      setMidiInputs(nextInputs);
+
+      setSelectedMidiInputId((prev) => {
+        if (prev && nextInputs.some((x) => x.id === prev)) return prev;
+        return nextInputs[0]?.id || "";
+      });
+
+      // 只在第一次（或新 access）時綁一次
+      if (!midiInputsBoundRef.current) {
+        for (const input of access.inputs.values()) {
+          input.onmidimessage = (msg) => {
+            const mode = midiModeRef.current;
+            const selectedId = selectedMidiInputIdRef.current;
+
+            if (mode === "none") return;
+            if (mode === "selected" && String(input.id) !== String(selectedId)) return;
+
+            // 防止訊息暴衝時主執行緒被重入卡死
+            if (midiIngressBusyRef.current) return;
+            midiIngressBusyRef.current = true;
+
+            try {
+              engine.handleMIDIMsg?.(msg.data);
+            } catch (e) {
+              console.warn("[RC] MIDI input handling failed", e);
+            } finally {
+              queueMicrotask(() => {
+                midiIngressBusyRef.current = false;
+              });
+            }
+          };
+        }
+
+        midiInputsBoundRef.current = true;
+      }
+    } catch (e) {
+      console.warn("[RC] requestMIDIAccess failed", e);
+      setMidiSupported(false);
+      setMidiInputs([]);
+      midiAccessRef.current = null;
+      midiInputsBoundRef.current = false;
+    }
+  };
+
+  useEffect(() => {
+    refreshMidiInputs();
+
+    return () => {
+      const access = midiAccessRef.current;
+      if (!access) return;
+
+      for (const input of access.inputs.values()) {
+        try {
+          input.onmidimessage = null;
+        } catch {}
+      }
+
+      midiInputsBoundRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const access = midiAccessRef.current;
+    if (!access) return;
+
+    const onStateChange = async () => {
+      midiInputsBoundRef.current = false;
+      await refreshMidiInputs();
+    };
+
+    access.onstatechange = onStateChange;
+
+    return () => {
+      if (access.onstatechange === onStateChange) {
+        access.onstatechange = null;
+      }
+    };
+  }, [midiInputs]);
+  
+
+  
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      const next = {};
+
+      for (const chain of chains) {
+        for (const mod of chain) {
+          if (mod?.kind !== "ks_source") continue;
+          const info = engine.getKSLastSmoothInfo?.(mod.id) || null;
+          if (info) next[mod.id] = info;
+        }
+      }
+
+      setKsRuntimeInfo((prev) => {
+        const prevKeys = Object.keys(prev);
+        const nextKeys = Object.keys(next);
+        if (prevKeys.length !== nextKeys.length) return next;
+
+        for (const key of nextKeys) {
+          const a = prev[key];
+          const b = next[key];
+          if (!a || !b) return next;
+          if (
+            a.updatedAt !== b.updatedAt ||
+            a.finalSmooth !== b.finalSmooth ||
+            a.autoSmooth !== b.autoSmooth
+          ) {
+            return next;
+          }
+        }
+
+        return prev;
+      });
+    }, 250);
+
+    return () => clearInterval(id);
+  }, [engine, chains]);
 
   // 全域 MIDI 入口（供 routingComposer.onNoteOn 呼叫）
   useEffect(() => {
@@ -443,19 +668,20 @@ export default function ChainEditor({
       },
 
       engine,
-
-      // Step 3-2 loaders（你已經做好的話就留著）
       loadFromURL,
       loadChainFromURL,
 
-      // Step 3: state access
       getState: () => ({
         chains,
         chainMeta,
         mutes: chainMutes,
+        ui: {
+          showSpectrogramCompare,
+          midiInputMode,
+          selectedMidiInputId,
+        },
       }),
 
-      // Step 3: meta setters (for lock/name flags)
       setChainMeta: (idx, patch) => {
         const i = idx | 0;
         if (!patch || typeof patch !== "object") return;
@@ -466,7 +692,6 @@ export default function ChainEditor({
         );
       },
 
-      // Step 3: mute setter (optional but handy)
       setChainMute: (idx, muted) => {
         const i = idx | 0;
         setChainMutes((prev) =>
@@ -476,13 +701,18 @@ export default function ChainEditor({
     };
 
     return () => {
-      try { delete window.__RC_HANDLE__; } catch (_) {}
+      try {
+        delete window.__RC_HANDLE__;
+      } catch (_) {}
     };
   }, [
     engine,
     chains,
     chainMeta,
     chainMutes,
+    showSpectrogramCompare,
+    midiInputMode,
+    selectedMidiInputId,
   ]);
 
   useEffect(() => {
@@ -491,29 +721,43 @@ export default function ChainEditor({
       chains,
       mutes: chainMutes,
       chainMeta,
+      ui: {
+        showSpectrogramCompare,
+        midiInputMode,
+        selectedMidiInputId,
+      },
     });
-  }, [chains, chainMutes, chainMeta, onChange]);
+  }, [
+    chains,
+    chainMutes,
+    chainMeta,
+    onChange,
+    showSpectrogramCompare,
+    midiInputMode,
+    selectedMidiInputId,
+  ]);
 
   // 刪除確認彈窗
   const [confirmDel, setConfirmDel] = useState({ open: false, idx: null, step: 1 });
+
   const requestDeleteChain = (idx) => {
     if (isChainLocked(idx)) return;
     setConfirmDel({ open: true, idx, step: 1 });
   };
+
   const cancelDelete = () => setConfirmDel({ open: false, idx: null, step: 1 });
   const proceedDelete = () => setConfirmDel((s) => ({ ...s, step: 2 }));
+
   const confirmDelete = () => {
     setChains((cc) => {
       const next = cc.filter((_, i) => i !== confirmDel.idx);
       return next.length
         ? next
-        : [
-            [
-              { id: uid("src"), kind: "source", enabled: true, params: { ...DEFAULT_PARAMS.source } },
-              { id: uid("gain"), kind: "gain", enabled: true, params: { ...DEFAULT_PARAMS.gain } },
-              { id: uid("an"), kind: "analyzer", enabled: true, params: {} },
-            ],
-          ];
+        : [[
+            { id: uid("src"), kind: "source", enabled: true, params: { ...DEFAULT_PARAMS.source } },
+            { id: uid("gain"), kind: "gain", enabled: true, params: { ...DEFAULT_PARAMS.gain } },
+            { id: uid("an"), kind: "analyzer", enabled: true, params: {} },
+          ]];
     });
     cancelDelete();
   };
@@ -524,7 +768,6 @@ export default function ChainEditor({
       engine.buildMany(chains);
       engine.resume && engine.resume();
 
-      // 建完圖之後，把目前的 mute 狀態套用一次
       chainMutesRef.current.forEach((muted, idx) => {
         if (typeof engine.setChainMute === "function") {
           engine.setChainMute(idx, muted);
@@ -543,17 +786,6 @@ export default function ChainEditor({
       }
     });
   }, [engine, chainMutes]);
-
-
-  // MIDI Access
-  useEffect(() => {
-    if (!navigator.requestMIDIAccess) return;
-    navigator.requestMIDIAccess().then((midi) => {
-      for (const input of midi.inputs.values()) {
-        input.onmidimessage = (msg) => engine.handleMIDIMsg(msg.data);
-      }
-    });
-  }, []);
 
   // --- 事件操作 ---
   const onAdd = (chainIdx, kind) => {
@@ -592,29 +824,19 @@ export default function ChainEditor({
   const onParam = (chainIdx, id, k, v) => {
     if (isChainLocked(chainIdx)) return;
 
-    // 先即時推到現役 GainNode（避免必須重建）
     if (k === "gain") {
-        const ok = engine.updateGainNodeById(id, v);
-        if (!ok) console.warn("[RC] gain node not found for id:", id);
+      const ok = engine.updateGainNodeById(id, v);
+      if (!ok) console.warn("[RC] gain node not found for id:", id);
     }
-    // 再更新 state（保留 preset / 匯出）
+
     setChains((cc) => cc.map((c, i) =>
-        (i !== chainIdx ? c : c.map((m) => (m.id === id ? { ...m, params: { ...m.params, [k]: v } } : m)))
+      (i !== chainIdx ? c : c.map((m) => (m.id === id ? { ...m, params: { ...m.params, [k]: v } } : m)))
     ));
-  }
-    
-    // setChains((cc) =>
-    //   cc.map((c, i) =>
-    //     i !== chainIdx
-    //       ? c
-    //       : c.map((m) =>
-    //           m.id === id ? { ...m, params: { ...m.params, [k]: v } } : m
-    //         )
-    //   )
-    // );
+  };
 
   // 拖曳排序
   const [drag, setDrag] = useState(null);
+
   const onDragStartCard = (chainIdx, modIdx) => (e) => {
     if (isChainLocked(chainIdx)) return;
 
@@ -622,6 +844,7 @@ export default function ChainEditor({
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", `${chainIdx}:${modIdx}`);
   };
+
   const onDropCard = (chainIdx, modIdx) => (e) => {
     if (isChainLocked(chainIdx)) return;
 
@@ -634,6 +857,7 @@ export default function ChainEditor({
     );
     setDrag(null);
   };
+
   const onDropToEnd = (chainIdx) => (e) => {
     if (isChainLocked(chainIdx)) return;
 
@@ -656,8 +880,6 @@ export default function ChainEditor({
       return copy;
     });
 
-
-  // 單一 chain 匯出
   const exportChain = (idx) => {
     const chain = chains[idx];
     if (!chain) return;
@@ -680,7 +902,6 @@ export default function ChainEditor({
     URL.revokeObjectURL(url);
   };
 
-  // 單一 chain 匯入（會取代該條線路）
   const importChain = async (idx, file) => {
     if (isChainLocked(idx)) return;
 
@@ -715,12 +936,9 @@ export default function ChainEditor({
     }
   };
 
-  // 新增一條空的 chain（不含任何 module，預設無聲）
   const addChain = () =>
     setChains((cc) => [...cc, []]);
 
-
-  // 匯出 / 匯入 JSON
   const exportJSON = () => {
     const payload = {
       version: 2,
@@ -728,6 +946,11 @@ export default function ChainEditor({
       chainMeta,
       mutes: chainMutes,
       global: getSynthGlobalState(synth),
+      ui: {
+        showSpectrogramCompare,
+        midiInputMode,
+        selectedMidiInputId,
+      },
     };
 
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
@@ -738,6 +961,7 @@ export default function ChainEditor({
     a.click();
     URL.revokeObjectURL(url);
   };
+
   const importJSON = async (file) => {
     const text = await file.text();
     try {
@@ -749,6 +973,18 @@ export default function ChainEditor({
       setChainMeta(normalized.chainMeta);
       setChainMutes(normalized.mutes);
       applySynthGlobalState(synth, normalized.global);
+
+      if (json?.ui && typeof json.ui === "object") {
+        if (typeof json.ui.showSpectrogramCompare === "boolean") {
+          setShowSpectrogramCompare(json.ui.showSpectrogramCompare);
+        }
+        if (typeof json.ui.midiInputMode === "string") {
+          setMidiInputMode(json.ui.midiInputMode);
+        }
+        if (typeof json.ui.selectedMidiInputId === "string") {
+          setSelectedMidiInputId(json.ui.selectedMidiInputId);
+        }
+      }
     } catch (e) {
       console.warn("[RC] importJSON failed", e);
     }
@@ -758,11 +994,11 @@ export default function ChainEditor({
     <div className="p-6 text-white">
       {/* Toolbar */}
       <div className="flex items-center justify-between mb-4">
-        
         <div className="flex items-center gap-2 flex-wrap">
           <button className={buttonClass} onClick={exportJSON}>
             Export
           </button>
+
           <label className={`${buttonClass} cursor-pointer`}>
             Import
             <input
@@ -772,36 +1008,96 @@ export default function ChainEditor({
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (f) importJSON(f);
+                e.target.value = "";
               }}
             />
           </label>
+
+          <button
+            className={buttonClass}
+            onClick={() => setShowSpectrogramCompare((v) => !v)}
+          >
+            Spectrogram: {showSpectrogramCompare ? "On" : "Off"}
+          </button>
+
+          {midiSupported ? (
+            <>
+              <select
+                className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm"
+                value={midiInputMode}
+                onChange={(e) => {
+                  setMidiInputMode(e.target.value);
+                  e.target.blur();
+                }}
+                title="MIDI input mode"
+              >
+                <option value="all">MIDI: All</option>
+                <option value="none">MIDI: None</option>
+                <option value="selected">MIDI: Selected</option>
+              </select>
+
+              {midiInputMode === "selected" && (
+                <select
+                  className="bg-neutral-900 text-white border border-white/20 rounded-lg px-2 py-1 text-sm max-w-[220px]"
+                  value={selectedMidiInputId}
+                  onChange={(e) => {
+                    setSelectedMidiInputId(e.target.value);
+                    e.target.blur();
+                  }}
+                  title="Selected MIDI input port"
+                >
+                  {midiInputs.length === 0 ? (
+                    <option value="">No MIDI inputs</option>
+                  ) : (
+                    midiInputs.map((input) => (
+                      <option key={input.id} value={input.id}>
+                        {input.name}
+                      </option>
+                    ))
+                  )}
+                </select>
+              )}
+
+              <button className={buttonClass} onClick={refreshMidiInputs}>
+                Refresh MIDI
+              </button>
+            </>
+          ) : (
+            <span className="text-xs opacity-60">Web MIDI unavailable</span>
+          )}
+
           <button
             className={buttonClass}
             onClick={() => {
-                // 優先用 engine.buildMultiFrom；沒有就用狀態層手動複製
-                if (typeof engine.buildMultiFrom === 'function') {
-                    engine.buildMultiFrom(chains[0], Array.from({ length: 16 }, (_, i) => i));
-                } else {
-                    setChains((cc) => {
-                        const template = cc[0] || [];
-                        const all = Array.from({ length: 16 }, (_, ch) =>
-                            template.map((m) => ({
-                            ...m,
-                            id: uid(m.kind) + `_ch${ch}`,
-                            params: m.kind === 'ks_source'
-                                ? { ...m.params, ch: String(ch) }
-                                : { ...m.params }
-                            }))
-                        );
-                        return all;
-                    });
-                }
+              if (typeof engine.buildMultiFrom === "function") {
+                engine.buildMultiFrom(chains[0], Array.from({ length: 16 }, (_, i) => i));
+              } else {
+                setChains((cc) => {
+                  const template = cc[0] || [];
+                  const all = Array.from({ length: 16 }, (_, ch) =>
+                    template.map((m) => ({
+                      ...m,
+                      id: uid(m.kind) + `_ch${ch}`,
+                      params: m.kind === "ks_source"
+                        ? { ...m.params, ch: String(ch) }
+                        : { ...m.params },
+                    }))
+                  );
+                  return all;
+                });
+              }
             }}
           >
             Duplicate to 16 channels
           </button>
         </div>
       </div>
+
+      {showSpectrogramCompare && (
+        <div className="mb-4">
+          <SpectrogramComparePanel engine={engine} />
+        </div>
+      )}
 
       {/* Main chain list */}
       <div className="relative border border-dashed border-white/20 rounded-2xl p-4">
@@ -811,8 +1107,9 @@ export default function ChainEditor({
           return (
             <div
               key={chainIdx}
-              className={`relative mb-6 rounded-lg p-2 overflow-hidden
-                ${locked ? "bg-neutral-900/60 border border-yellow-500/40" : ""}`}
+              className={`relative mb-6 rounded-lg p-2 overflow-hidden ${
+                locked ? "bg-neutral-900/60 border border-yellow-500/40" : ""
+              }`}
             >
               <div className="flex items-center justify-between mb-2">
                 <div className="text-sm opacity-80">
@@ -821,11 +1118,7 @@ export default function ChainEditor({
 
                 {locked && (
                   <span
-                    className="text-xs px-2 py-0.5 rounded
-                              border border-yellow-400
-                              text-yellow-400
-                              bg-transparent
-                              opacity-100"
+                    className="text-xs px-2 py-0.5 rounded border border-yellow-400 text-yellow-400 bg-transparent opacity-100"
                     title="This chain is locked (GUI editing disabled)"
                   >
                     🔒 Locked
@@ -833,7 +1126,6 @@ export default function ChainEditor({
                 )}
 
                 <div className="flex gap-2 items-center">
-                  {/* 🔊 / 🔇 */}
                   <button
                     className={buttonClass}
                     onClick={() => toggleChainMute(chainIdx)}
@@ -842,7 +1134,6 @@ export default function ChainEditor({
                     {chainMutes[chainIdx] ? "🔇" : "🔊"}
                   </button>
 
-                  {/* 單一 chain 匯出 */}
                   <button
                     className={buttonClass}
                     onClick={() => exportChain(chainIdx)}
@@ -850,7 +1141,6 @@ export default function ChainEditor({
                     Export
                   </button>
 
-                  {/* 單一 chain 匯入（取代這條） */}
                   <label className={`${buttonClass} cursor-pointer`}>
                     Import
                     <input
@@ -881,11 +1171,9 @@ export default function ChainEditor({
                 </div>
               </div>
 
-              {/* ✅ 每條 chain 自己的水平 scroll 容器 */}
               <div className="relative rounded-xl overflow-hidden">
-                {/* 左側 U 型 glow */}
                 <div
-                  className="pointer-events-none absolute inset-y-0 left-0 w-32 z-10 transition-opacity duration-100"
+                  className="pointer-events-none absolute inset-y-0 left-0 w-32 z-10 transition-opacity duration-150"
                   style={{
                     opacity: (chainEdgeGlow[chainIdx]?.left ?? 0) > 0
                       ? 0.35 + (chainEdgeGlow[chainIdx]?.left ?? 0) * 0.65
@@ -898,9 +1186,8 @@ export default function ChainEditor({
                   }}
                 />
 
-                {/* 右側 U 型 glow */}
                 <div
-                  className="pointer-events-none absolute inset-y-0 right-0 w-32 z-10 transition-opacity duration-100"
+                  className="pointer-events-none absolute inset-y-0 right-0 w-32 z-10 transition-opacity duration-150"
                   style={{
                     opacity: (chainEdgeGlow[chainIdx]?.right ?? 0) > 0
                       ? 0.35 + (chainEdgeGlow[chainIdx]?.right ?? 0) * 0.65
@@ -923,34 +1210,35 @@ export default function ChainEditor({
                     stopAutoScroll();
                   }}
                 >
-                <div className="flex gap-3 items-stretch min-w-max">
-                  {chain.map((mod, modIdx) => (
-                    <div
-                      key={mod.id}
-                      onDrop={onDropCard(chainIdx, modIdx)}
-                      onDragOver={(e) => e.preventDefault()}
-                      className="hover:border-white/20 transition border border-transparent rounded-2xl shrink-0"
-                      title="Drag to reorder"
-                    >
-                      <ChainModuleCard
-                        mod={mod}
-                        onToggle={() => onToggle(chainIdx, mod.id)}
-                        onRemove={() => onRemove(chainIdx, mod.id)}
-                        onParam={(k, v) => onParam(chainIdx, mod.id, k, v)}
-                        onDragStart={onDragStartCard(chainIdx, modIdx)}
-                      />
-                    </div>
-                  ))}
+                  <div className="flex gap-3 items-stretch min-w-max">
+                    {chain.map((mod, modIdx) => (
+                      <div
+                        key={mod.id}
+                        onDrop={onDropCard(chainIdx, modIdx)}
+                        onDragOver={(e) => e.preventDefault()}
+                        className="hover:border-white/20 transition border border-transparent rounded-2xl shrink-0"
+                        title="Drag to reorder"
+                      >
+                        <ChainModuleCard
+                          mod={mod}
+                          runtimeInfo={mod.kind === "ks_source" ? ksRuntimeInfo[mod.id] || null : null}
+                          onToggle={() => onToggle(chainIdx, mod.id)}
+                          onRemove={() => onRemove(chainIdx, mod.id)}
+                          onParam={(k, v) => onParam(chainIdx, mod.id, k, v)}
+                          onDragStart={onDragStartCard(chainIdx, modIdx)}
+                        />
+                      </div>
+                    ))}
 
-                  <div
-                    className="w-12 rounded-xl border-2 border-dashed border-white/10 hover:border-white/20 flex items-center justify-center opacity-60 shrink-0"
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={onDropToEnd(chainIdx)}
-                  >
-                    →
+                    <div
+                      className="w-12 rounded-xl border-2 border-dashed border-white/10 hover:border-white/20 flex items-center justify-center opacity-60 shrink-0"
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={onDropToEnd(chainIdx)}
+                    >
+                      →
+                    </div>
                   </div>
                 </div>
-              </div>
               </div>
 
               <div className="mt-3 flex flex-wrap gap-2">
@@ -968,7 +1256,6 @@ export default function ChainEditor({
           );
         })}
 
-        {/* 新增線路按鈕：加在所有 chain 的最底下 */}
         <div className="mt-2 flex justify-center">
           <button className={buttonClass} onClick={addChain}>
             + Add chain
@@ -976,7 +1263,6 @@ export default function ChainEditor({
         </div>
       </div>
 
-      {/* 刪除確認彈窗 */}
       {confirmDel.open && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-neutral-900 border border-white/10 rounded-2xl p-5 w-[420px] shadow-xl">
