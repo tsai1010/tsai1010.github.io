@@ -13,7 +13,7 @@ let osc_release = 2.0;
 let A4_freq = 440.0;
 
 let menuBtn_click = false; //menu btn
-let playInput = false; //Audio btn
+let playInput = true; //Audio btn
 let opMidi = false;
 
 let cfShow = false;
