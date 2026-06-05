@@ -1,0 +1,155 @@
+/* *,*::before,*::after{box-sizing:border-box;margin:0;padding:0} */
+html,body{
+  width:100%;
+  height:100%;
+  overflow:hidden;
+  background:#000;
+  cursor:none;
+  margin:0;
+  padding:0;
+}
+
+canvas{
+  display:block;
+  position:fixed;
+  top:0;
+  left:0;
+  width:100%;
+  height:100%;
+}
+html,body{width:100%;height:100%;overflow:hidden;background:#000;cursor:none}
+canvas{display:block;position:fixed;top:0;left:0;width:100%;height:100%}
+
+/* ── HUD Overlay ─────────────────────────────────────────────────── */
+#hud{
+  position:fixed;top:0;left:0;width:100%;height:100%;
+  pointer-events:none;z-index:10;
+  font-family:'Courier New',monospace;
+  color:rgba(255,255,255,.6);
+}
+#title{
+  position:absolute;top:20px;left:50%;transform:translateX(-50%);
+  text-align:center;
+  transition:opacity 1.5s;
+}
+#title h1{
+  font-size:clamp(18px,3vw,32px);font-weight:300;letter-spacing:8px;
+  text-transform:uppercase;
+  background:linear-gradient(90deg,#ff6b4a,#fff,#4a9eff);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+#title .sub{
+  font-size:clamp(9px,1.2vw,12px);letter-spacing:4px;
+  color:rgba(255,255,255,.3);margin-top:4px;
+}
+
+/* Side labels */
+.side-label{
+  position:absolute;top:50%;transform:translateY(-50%);
+  font-size:10px;letter-spacing:3px;text-transform:uppercase;
+  writing-mode:vertical-rl;
+  opacity:.25;transition:opacity .5s;
+}
+#label-left{left:16px;color:#ff6b4a;text-orientation:mixed;transform:translateY(-50%) rotate(180deg)}
+#label-right{right:16px;color:#4a9eff}
+
+/* Freq displays */
+.freq-display{
+  position:absolute;bottom:60px;
+  font-size:11px;font-variant-numeric:tabular-nums;
+  letter-spacing:2px;opacity:.5;
+}
+#freq-left{left:30px;color:#ff6b4a}
+#freq-right{right:30px;color:#4a9eff;text-align:right}
+
+/* Center collision info */
+#collision-info{
+  position:absolute;bottom:20px;left:50%;transform:translateX(-50%);
+  text-align:center;font-size:10px;letter-spacing:2px;
+  color:rgba(255,255,255,.25);
+}
+#beat-display{
+  font-size:18px;font-weight:700;
+  color:rgba(255,255,255,.5);
+  font-variant-numeric:tabular-nums;
+}
+
+/* Intro overlay */
+#intro{
+  position:fixed;top:0;left:0;width:100%;height:100%;
+  background:rgba(0,0,0,.9);z-index:100;
+  display:flex;align-items:center;justify-content:center;
+  flex-direction:column;gap:16px;
+  cursor:pointer;pointer-events:auto;
+  transition:opacity 1s;
+}
+#intro h2{
+  font-family:'Courier New',monospace;
+  font-size:clamp(14px,2.5vw,24px);font-weight:300;
+  letter-spacing:6px;text-transform:uppercase;
+  color:rgba(255,255,255,.7);
+}
+#intro .hint{
+  font-family:'Courier New',monospace;
+  font-size:11px;letter-spacing:3px;
+  color:rgba(255,255,255,.25);
+  animation:pulse-hint 2s ease-in-out infinite;
+}
+@keyframes pulse-hint{0%,100%{opacity:.2}50%{opacity:.6}}
+
+/* Credit */
+#credit{
+  position:absolute;bottom:20px;right:20px;
+  font-size:9px;letter-spacing:2px;
+  color:rgba(255,255,255,.15);
+}
+#credit a{color:rgba(255,255,255,.25);text-decoration:none}
+#credit a:hover{color:rgba(255,255,255,.5)}
+
+/* Custom cursor */
+#cursor{
+  position:fixed;pointer-events:none;z-index:50;
+  width:24px;height:24px;
+  transform:translate(-50%,-50%);
+}
+.cur-core{
+  position:absolute;top:50%;left:50%;
+  width:6px;height:6px;border-radius:50%;
+  background:#fff;
+  transform:translate(-50%,-50%);
+  box-shadow:0 0 12px rgba(255,255,255,.5);
+  transition:background .3s;
+}
+.cur-ring{
+  position:absolute;top:50%;left:50%;
+  width:20px;height:20px;border-radius:50%;
+  border:1px solid rgba(255,255,255,.3);
+  transform:translate(-50%,-50%);
+  transition:all .3s;
+}
+
+#composer-slot:hover,
+#composer-slot:hover * {
+  cursor: auto !important;
+}
+/* Demo3: Routing Composer button */
+#composer-slot{
+  position:fixed;
+  top:20px;
+  left:20px;
+  z-index:9999;
+  pointer-events:auto;
+}
+
+#composer-slot *{
+  pointer-events:auto;
+}
+
+.rc-overlay {
+  cursor: default !important;
+}
+
+.rc-overlay * {
+  cursor: inherit !important;
+}

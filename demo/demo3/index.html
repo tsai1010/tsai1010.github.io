@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>Interactive Timbre Explorer</title>
+    <link rel="stylesheet" href="./style.css">
+  </head>
+
+  <body>
+    <canvas id="c"></canvas>
+    <!-- <div id="composer-slot"></div> -->
+
+    <div id="hud">
+      <div id="title">
+        <h1>Interactive Timbre Explorer</h1>
+        <div class="sub">Mouse-controlled KS Arpeggio &middot; Routing Composer</div>
+      </div>
+
+      <div class="side-label" id="label-left">Bright &middot; Steel-like</div>
+      <div class="side-label" id="label-right">Smooth &middot; Nylon-like</div>
+
+      <div class="freq-display" id="freq-left">
+        <div>PITCH</div>
+        <div id="fl-hz">MIDI 60</div>
+        <div id="fl-note">C4</div>
+      </div>
+      <div class="freq-display" id="freq-right">
+        <div>SMOOTH OFFSET</div>
+        <div id="fr-hz">0.000</div>
+        <div id="fr-note">center</div>
+      </div>
+
+      <div id="collision-info">
+        <div id="beat-display">HOLD</div>
+        <div>LEFT CLICK / TOUCH TO ARPEGGIATE</div>
+      </div>
+
+      <div id="credit">
+        Visual base: <a href="https://codepen.io/8binami/pen/NPRwPOd" target="_blank" rel="noopener">8binami</a>
+        &middot; Sound engine: MidiSynth Routing Composer
+      </div>
+    </div>
+
+    <div id="cursor">
+      <div class="cur-core"></div>
+      <div class="cur-ring"></div>
+    </div>
+
+    <div id="intro">
+      <h2>Interactive Timbre Explorer</h2>
+      <div class="hint">Click to start &middot; Hold mouse to play &middot; Move X for smooth, Y for pitch</div>
+    </div>
+
+    <script type="module" src="./script.js"></script>
+  </body>
+</html>
