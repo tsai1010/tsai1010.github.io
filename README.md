@@ -3,6 +3,7 @@
 ## GUI Version
 You can also use a version with built-in GUI for controlling parameters such as volume, ADSR, reverb, chorus, and more.  
 👉 [**Live Demo here**](https://tsai1010.github.io/index-gui.html)
+👉 [**Interactive Timbre Explorer**](https://tsai1010.github.io/demo/demo3/index.html)
 
 ### Load
 Load it directly from the CDN:  
