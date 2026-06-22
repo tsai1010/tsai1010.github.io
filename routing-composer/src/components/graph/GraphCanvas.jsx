@@ -190,7 +190,8 @@ export default function GraphCanvas({
       onPointerUp={(e) => {
         const d = dragRef.current;
         if (d?.type === "wire") {
-          const el = document.elementFromPoint(e.clientX, e.clientY);
+          const doc = wsRef.current?.ownerDocument || document;
+          const el = doc.elementFromPoint(e.clientX, e.clientY);
           const portEl = el?.closest?.(".rcg-port[data-port='in']");
           const nodeEl = el?.closest?.(".rcg-node");
           const targetId = portEl?.dataset?.nodeId || nodeEl?.dataset?.nodeId;
