@@ -11,6 +11,7 @@
 import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom";
 import ChainEditor from "./ChainEditor.jsx";
+import GraphComposer from "./graph/GraphComposer.jsx";
 
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
@@ -104,6 +105,7 @@ export default function AudioPatchbay({
   showButton = true,
   initialState,
   onChange,
+  editor = "graph",
 }) {
   const [open, setOpen] = useState(false);
 
@@ -385,7 +387,7 @@ export default function AudioPatchbay({
         }}
       >
         <div className="rc-panel" role="dialog" aria-modal="true">
-          <div className="rc-header">
+          <div className="rc-header" style={editor === "graph" ? { display: "none" } : undefined}>
             <div className="flex items-center gap-4 flex-wrap">
               <div>Routing Composer</div>
 
@@ -451,12 +453,21 @@ export default function AudioPatchbay({
             </div>
           </div>
 
-          <div className="rc-body">
-            <ChainEditor
-              synth={synth}
-              initialState={initialState}
-              onChange={onChange}
-            />
+          <div className="rc-body" style={editor === "graph" ? { padding: 0, overflow: "hidden" } : undefined}>
+            {editor === "classic" ? (
+              <ChainEditor
+                synth={synth}
+                initialState={initialState}
+                onChange={onChange}
+              />
+            ) : (
+              <GraphComposer
+                synth={synth}
+                initialState={initialState}
+                onChange={onChange}
+                embedded={true}
+              />
+            )}
           </div>
         </div>
       </div>

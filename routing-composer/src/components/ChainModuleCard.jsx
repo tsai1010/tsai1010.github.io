@@ -366,6 +366,13 @@ export default function ChainModuleCard({
                 <option value="grey">Mix</option>
               </select>
             </div>
+
+            {String(params.smoothingMode ?? "auto") === "auto" && (
+              <div className="text-[11px] opacity-70">
+                auto: smoothing 依據 synth.options[ch].stringDamping /
+                variation 與 note 計算
+              </div>
+            )}
           </>
         )}
 
