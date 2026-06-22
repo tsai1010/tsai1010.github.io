@@ -6,6 +6,8 @@
 // - (patched) support global synth params (a4, masterVol)
 // -------------------------------------------------------------
 
+import { normalizeGraphState, graphChainToLinearChain } from "./graphMigration.js";
+
 function isModule(obj) {
   return obj && typeof obj === "object" && typeof obj.kind === "string";
 }
@@ -140,4 +142,28 @@ export function normalizeSingleChain(json, opts = {}) {
   }
 
   return null;
+}
+
+/**
+ * Normalize routing graph state. This is the preferred v2 path.
+ * It accepts both old v1 chain-list JSON and new v2 graph JSON.
+ */
+export function normalizeRoutingGraphState(json) {
+  return normalizeGraphState(json);
+}
+
+/**
+ * Best-effort export of v2 graph state back to old v1 chain-list shape.
+ * Useful for backwards-compatible preset saving or debugging.
+ */
+export function graphStateToLegacyState(graphState) {
+  const normalized = normalizeGraphState(graphState);
+  if (!normalized) return null;
+  return {
+    version: 1,
+    chains: normalized.chains.map(graphChainToLinearChain),
+    chainMeta: normalized.chains.map((c) => ({ name: c.name, locked: !!c.locked })),
+    mutes: normalized.chains.map((c) => !!c.muted),
+    global: normalized.global || null,
+  };
 }

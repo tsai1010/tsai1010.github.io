@@ -6,6 +6,7 @@
 
 import { generatePianoExcitation } from "./excitation.js";
 import { CAPTURE_WORKLET_SOURCE } from "./captureWorkletSource.js";
+import { topologicalSort } from "./graphUtils.js";
 
 export class AudioEngine {
   constructor(actx) {
@@ -423,23 +424,20 @@ export class AudioEngine {
     const vn = this.clampValue((Number(velocity) - 1) / 126, 0, 1);
 
     if (profile === "nylon") {
-        const highBoost = this.clampValue((Number(note) - 60) / 24, 0, 1);
+      const base =
+        0.22 +
+        0.18 * Math.pow(nn, 0.8) -
+        0.05 * Math.pow(vn, 0.7);
 
-        const base =
-            0.22 +
-            0.18 * Math.pow(nn, 0.8) +
-            0.10 * Math.pow(highBoost, 1.1) -
-            0.04 * Math.pow(vn, 0.7);
+      const rand =
+        (Math.random() * 2 - 1) * 0.015 +
+        (1 - nn) * (Math.random() * 2 - 1) * 0.01;
 
-        const rand =
-            (Math.random() * 2 - 1) * 0.008 +
-            (1 - nn) * (Math.random() * 2 - 1) * 0.005;
-
-        return {
-            auto: base + rand,
-            min: 0.05,
-            max: 0.75,
-        };
+      return {
+        auto: base + rand,
+        min: 0.05,
+        max: 0.75,
+      };
     }
 
     const base =
@@ -771,6 +769,310 @@ export class AudioEngine {
             }
         }
     }
+  }
+
+
+
+
+  // --------------------------------------------------------------------
+  // Graph v2 support — Build node/edge based routing graphs.
+  // Structural changes rebuild the affected chain; parameter changes should
+  // use updateGraphNodeParam() for smooth AudioParam automation.
+  // --------------------------------------------------------------------
+  _createGraphAudioNode(mod, chain = {}, chainIdx = 0) {
+    const k = mod.kind;
+    const p = mod.params || {};
+    const ctx = this.actx;
+
+    if (mod.enabled === false) {
+      const g = ctx.createGain();
+      return { in: g, out: g, raw: g };
+    }
+
+    switch (k) {
+      case "ks_source": {
+        const out = ctx.createGain();
+        const params = { ...p, ch: chain.ch ?? p.ch ?? "all", program: chain.program ?? p.program ?? "all" };
+        this.liveNodes.set(mod.id + ":ksOut", out);
+        this.liveNodes.set(mod.id + ":ksParams", params);
+        this.liveNodes.set(mod.id + ":chainIdx", chainIdx | 0);
+        this.liveNodes.set(mod.id + ":lastSmoothInfo", null);
+        this.liveNodes.set("keyboardTarget", out);
+        return { in: out, out, raw: out };
+      }
+
+      case "source": {
+        const osc = ctx.createOscillator();
+        osc.type = p.type || "sawtooth";
+        const env = ctx.createGain();
+        env.gain.value = 0;
+        osc.connect(env);
+        osc.start();
+        this.liveNodes.set(mod.id + ":osc", osc);
+        this.liveNodes.set(mod.id + ":env", env);
+        this.liveNodes.set(mod.id + ":oscType", osc.type);
+        this.liveNodes.set(mod.id + ":ch", chain.ch ?? p.ch ?? "all");
+        this.liveNodes.set(mod.id + ":adsr", p.adsr || { a: 0.003, d: 0.08, s: 0.4, r: 0.2 });
+        this.liveNodes.set(mod.id + ":level", Number.isFinite(Number(p.level)) ? Number(p.level) : 0.15);
+        this.liveNodes.set("keyboardTarget", env);
+        return { in: env, out: env, raw: env };
+      }
+
+      case "gain": {
+        const g = ctx.createGain();
+        g.gain.value = Number(p.gain ?? 1.0);
+        this.liveNodes.set(mod.id + ":node", g);
+        return { in: g, out: g, raw: g };
+      }
+
+      case "filter": {
+        const biq = ctx.createBiquadFilter();
+        biq.type = p.mode || "lowpass";
+        biq.frequency.value = Number(p.freq || 1200);
+        biq.Q.value = Number(p.q || 0.7);
+        if (typeof p.gain === "number") biq.gain.value = Number(p.gain);
+        this.liveNodes.set(mod.id + ":node", biq);
+        return { in: biq, out: biq, raw: biq };
+      }
+
+      case "delay": {
+        const d = ctx.createDelay(2);
+        d.delayTime.value = Number(p.time || 0.25);
+        const fb = ctx.createGain();
+        fb.gain.value = Number(p.feedback || 0.3);
+        const wet = ctx.createGain();
+        wet.gain.value = Number(p.mix || 0.3);
+        const dry = ctx.createGain();
+        dry.gain.value = 1 - wet.gain.value;
+        const input = ctx.createGain();
+        const output = ctx.createGain();
+        input.connect(d);
+        input.connect(dry);
+        d.connect(fb).connect(d);
+        d.connect(wet);
+        dry.connect(output);
+        wet.connect(output);
+        const raw = { input, output, delay: d, fb, mix: wet, wet, dry };
+        this.liveNodes.set(mod.id + ":node", raw);
+        return { in: input, out: output, raw };
+      }
+
+      case "convolver_ir": {
+        const conv = ctx.createConvolver();
+        const wet = ctx.createGain();
+        const dry = ctx.createGain();
+        const out = ctx.createGain();
+        const input = ctx.createGain();
+        const mix = Math.max(0, Math.min(1, Number(p.mix ?? 0.3)));
+        wet.gain.value = mix;
+        dry.gain.value = 1 - mix;
+        const irId = String(p.irId ?? "IR_Gibson");
+        const buf = this.irBuffers && this.irBuffers.get(irId);
+        if (buf) conv.buffer = buf;
+        input.connect(dry).connect(out);
+        input.connect(conv).connect(wet).connect(out);
+        this.liveNodes.set(mod.id + ":node", { input, conv, wet, dry, out });
+        this.liveNodes.set(mod.id + ":conv", conv);
+        this.liveNodes.set(mod.id + ":wet", wet);
+        this.liveNodes.set(mod.id + ":dry", dry);
+        return { in: input, out, raw: { input, conv, wet, dry, out } };
+      }
+
+      case "reverb": {
+        // Simple placeholder reverb using Convolver only when an IR buffer is available.
+        const input = ctx.createGain();
+        const out = ctx.createGain();
+        const dry = ctx.createGain();
+        const wet = ctx.createGain();
+        const conv = ctx.createConvolver();
+        const mix = Math.max(0, Math.min(1, Number(p.mix ?? 0.25)));
+        dry.gain.value = 1 - mix;
+        wet.gain.value = mix;
+        input.connect(dry).connect(out);
+        input.connect(conv).connect(wet).connect(out);
+        const firstIR = this.irBuffers?.values?.().next?.().value;
+        if (firstIR) conv.buffer = firstIR;
+        this.liveNodes.set(mod.id + ":node", { input, conv, wet, dry, out });
+        return { in: input, out, raw: { input, conv, wet, dry, out } };
+      }
+
+      case "analyzer": {
+        const tap = ctx.createGain();
+        tap.connect(this.analyser);
+        this.liveNodes.set(mod.id + ":node", tap);
+        return { in: tap, out: tap, raw: tap };
+      }
+
+      case "output": {
+        const g = ctx.createGain();
+        this.liveNodes.set(mod.id + ":node", g);
+        this.liveNodes.set(mod.id + ":output", g);
+        return { in: g, out: g, raw: g };
+      }
+
+      default: {
+        const pass = ctx.createGain();
+        this.liveNodes.set(mod.id + ":node", pass);
+        return { in: pass, out: pass, raw: pass };
+      }
+    }
+  }
+
+  buildGraph(chain, chainIdx = 0) {
+    if (!chain || !chain.graph) return;
+    const graph = chain.graph;
+    const nodeInstances = new Map();
+
+    for (const mod of graph.nodes || []) {
+      nodeInstances.set(mod.id, this._createGraphAudioNode(mod, chain, chainIdx));
+    }
+
+    for (const edge of graph.edges || []) {
+      const from = nodeInstances.get(edge.from);
+      const to = nodeInstances.get(edge.to);
+      if (!from || !to) continue;
+      try {
+        from.out.connect(to.in);
+      } catch (e) {
+        console.warn("[RC] graph edge connect failed", edge, e);
+      }
+    }
+
+    const outputNodes = (graph.nodes || []).filter((n) => n.kind === "output");
+    let sinks = outputNodes.length ? outputNodes : [];
+
+    if (!sinks.length) {
+      const hasOutgoing = new Set((graph.edges || []).map((e) => e.from));
+      sinks = (graph.nodes || []).filter((n) => !hasOutgoing.has(n.id));
+    }
+
+    const chainGain = this.actx.createGain();
+    chainGain.gain.value = chain.muted ? 0 : Number(chain.gain ?? 1);
+    this.liveNodes.set(`chainGain:${chainIdx | 0}`, chainGain);
+    this.chainMuteStates?.set?.(chainIdx | 0, !!chain.muted);
+
+    for (const sink of sinks) {
+      const inst = nodeInstances.get(sink.id);
+      if (!inst) continue;
+      try { inst.out.connect(chainGain); } catch (e) {}
+    }
+
+    const chSel = chain.ch ?? "all";
+    const channels = chSel === "all" ? Array.from({ length: 16 }, (_, i) => i) : [Number(chSel) & 0x0f];
+    for (const ch of channels) {
+      const mix = this.mixers?.[ch];
+      if (mix) {
+        try { chainGain.connect(mix); } catch (e) {}
+      }
+    }
+  }
+
+  buildGraphMany(chains = []) {
+    const prev = this.liveNodes || new Map();
+    const oscVoices = prev.get("__oscVoices__");
+    const ksVoices = prev.get("__ksVoices__");
+    const next = new Map();
+    const oldLive = this.liveNodes;
+
+    chains.forEach((chain, idx) => {
+      const temp = new Map();
+      this.liveNodes = temp;
+      this.buildGraph(chain, idx);
+      for (const [k, v] of temp.entries()) next.set(k, v);
+    });
+
+    if (oscVoices) next.set("__oscVoices__", oscVoices);
+    if (ksVoices) next.set("__ksVoices__", ksVoices);
+    this.liveNodes = next;
+  }
+
+  _smoothAudioParam(param, value, time = 0.015) {
+    if (!param) return false;
+    const now = this.actx.currentTime;
+    try {
+      param.cancelScheduledValues(now);
+      const cur = Number(param.value);
+      param.setValueAtTime(Number.isFinite(cur) ? cur : Number(value), now);
+      param.setTargetAtTime(Number(value), now, time);
+      return true;
+    } catch {
+      try {
+        param.value = Number(value);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+  }
+
+  updateGraphNodeParam(nodeId, key, value) {
+    if (!nodeId || !key) return false;
+
+    const raw = this.liveNodes?.get(nodeId + ":node");
+    const ksParams = this.liveNodes?.get(nodeId + ":ksParams");
+    if (ksParams) {
+      ksParams[key] = value;
+      this.liveNodes.set(nodeId + ":ksParams", ksParams);
+      return true;
+    }
+
+    const osc = this.liveNodes?.get(nodeId + ":osc");
+    if (osc && key === "type") {
+      try { osc.type = String(value); } catch {}
+      this.liveNodes.set(nodeId + ":oscType", osc.type);
+      return true;
+    }
+    if (key === "adsr") {
+      this.liveNodes?.set(nodeId + ":adsr", value);
+      return true;
+    }
+    if (key === "level") {
+      this.liveNodes?.set(nodeId + ":level", Number(value));
+      return true;
+    }
+
+    if (!raw) return false;
+
+    // GainNode
+    if (raw.gain && key === "gain") {
+      return this._smoothAudioParam(raw.gain, value, 0.01);
+    }
+
+    // BiquadFilterNode
+    if (raw.frequency && (key === "freq" || key === "frequency")) {
+      return this._smoothAudioParam(raw.frequency, value, 0.015);
+    }
+    if (raw.Q && (key === "q" || key === "Q")) {
+      return this._smoothAudioParam(raw.Q, value, 0.015);
+    }
+    if (raw.gain && key === "gain") {
+      return this._smoothAudioParam(raw.gain, value, 0.015);
+    }
+    if (raw.type && key === "mode") {
+      try { raw.type = String(value); return true; } catch { return false; }
+    }
+
+    // Delay wrapper
+    if (raw.delay && key === "time") {
+      return this._smoothAudioParam(raw.delay.delayTime, value, 0.015);
+    }
+    if (raw.fb && key === "feedback") {
+      return this._smoothAudioParam(raw.fb.gain, value, 0.015);
+    }
+    if (raw.conv && key === "irId") {
+      const buf = this.irBuffers && this.irBuffers.get(String(value));
+      if (buf) { raw.conv.buffer = buf; return true; }
+      return false;
+    }
+
+    if ((raw.mix || raw.wet) && key === "mix") {
+      const mix = Math.max(0, Math.min(1, Number(value)));
+      const ok1 = this._smoothAudioParam((raw.mix || raw.wet).gain, mix, 0.015);
+      const ok2 = raw.dry ? this._smoothAudioParam(raw.dry.gain, 1 - mix, 0.015) : true;
+      return ok1 && ok2;
+    }
+
+    return false;
   }
 
 
